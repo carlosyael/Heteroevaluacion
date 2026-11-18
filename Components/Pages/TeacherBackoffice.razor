@@ -1,0 +1,601 @@
+@page "/maestro"
+@rendermode InteractiveServer
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject StudentImportService ImportService
+@inject EvaluationService EvalService
+@inject SessionService Session
+@inject IJSRuntime JS
+
+<PageTitle>Backoffice Maestro - Heteroevaluación</PageTitle>
+
+@if (!Session.IsTeacherAuthenticated)
+{
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-5">
+                <div class="card shadow-sm border-0">
+                    <div class="card-body p-4">
+                        <h3 class="fw-bold mb-2">Backoffice del Maestro</h3>
+                        <p class="text-muted small mb-4">
+                            Ingresa el PIN de docente para gestionar estudiantes y consultar resultados.
+                        </p>
+
+                        @if (!string.IsNullOrEmpty(_pinError))
+                        {
+                            <div class="alert alert-danger py-2">@_pinError</div>
+                        }
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">PIN de Acceso</label>
+                            <input type="password" class="form-control form-control-lg"
+                                   placeholder="PIN docente"
+                                   @bind="_pinInput"
+                                   @bind:event="oninput"
+                                   @onkeydown="HandlePinKeyDown" />
+                            <div class="form-text">PIN por defecto: <code>profesor2026</code></div>
+                        </div>
+
+                        <button class="btn btn-dark w-100 btn-lg" @onclick="VerifyPin">
+                            Ingresar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="container py-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+            <div>
+                <h2 class="fw-bold mb-0">Backoffice del Maestro</h2>
+                <span class="text-muted small">Gestión de estudiantes y resultados de heteroevaluación</span>
+            </div>
+            <button class="btn btn-outline-secondary" @onclick="LogoutTeacher">Cerrar sesión</button>
+        </div>
+
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                    <h5 class="fw-bold mb-0">Orquestación de Evaluación</h5>
+                    @if (_evalState.IsOpen && _activeStudent != null)
+                    {
+                        <span class="badge bg-success fs-6">
+                            ACTIVA: @_activeStudent.Nombre (@_activeStudent.Id)
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-secondary fs-6">EVALUACIÓN CERRADA</span>
+                    }
+                </div>
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Estudiante a evaluar</label>
+                        <select class="form-select" @bind="_selectedActiveStudentId">
+                            <option value="">-- Selecciona un estudiante --</option>
+                            @foreach (var s in _students)
+                            {
+                                <option value="@s.Id">@s.Id - @s.Nombre (@s.Carrera)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-success w-100"
+                                @onclick="StartEvaluationAsync"
+                                disabled="@string.IsNullOrEmpty(_selectedActiveStudentId)">
+                            Iniciar Evaluación
+                        </button>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-danger w-100"
+                                @onclick="CloseEvaluationAsync"
+                                disabled="@(!_evalState.IsOpen)">
+                            Cerrar Evaluación
+                        </button>
+                    </div>
+                </div>
+                @if (!string.IsNullOrEmpty(_orchestrationMessage))
+                {
+                    <div class="alert alert-info py-2 small mt-3 mb-0">@_orchestrationMessage</div>
+                }
+            </div>
+        </div>
+
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <button class="nav-link @(_activeTab == 0 ? "active fw-bold" : "")" @onclick="() => SwitchTab(0)">
+                    Estudiantes y Carga Masiva (@_students.Count)
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link @(_activeTab == 1 ? "active fw-bold" : "")" @onclick="() => SwitchTab(1)">
+                    Resultados y Promedios
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link @(_activeTab == 2 ? "active fw-bold" : "")" @onclick="() => SwitchTab(2)">
+                    Configuración y Reseteo
+                </button>
+            </li>
+        </ul>
+
+        @if (_activeTab == 0)
+        {
+            <div class="row g-4">
+                <div class="col-lg-5">
+                    <div class="card shadow-sm border-0 mb-4">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-2">Cargar Estudiantes (CSV o Excel)</h5>
+                            <p class="text-muted small mb-3">
+                                El archivo debe tener las columnas: <code>Id</code>, <code>Nombre</code>, <code>Carrera</code>, <code>TemaTesis</code>.
+                            </p>
+
+                            <InputFile OnChange="HandleFileUpload" accept=".csv,.xlsx,.xls" class="form-control mb-3" />
+
+                            @if (_isUploading)
+                            {
+                                <div class="text-primary small mb-2">Procesando archivo...</div>
+                            }
+
+                            @if (_importResult != null)
+                            {
+                                <div class="alert alert-info py-2 small">
+                                    <strong>Importación completada:</strong>
+                                    @_importResult.Added agregados, @_importResult.Updated actualizados.
+                                    @if (_importResult.Errors.Count > 0)
+                                    {
+                                        <ul class="mb-0 mt-1 text-danger">
+                                            @foreach (var err in _importResult.Errors.Take(5))
+                                            {
+                                                <li>@err</li>
+                                            }
+                                        </ul>
+                                    }
+                                </div>
+                            }
+
+                            <button class="btn btn-outline-primary btn-sm" @onclick="DownloadTemplateAsync">
+                                Descargar Plantilla Excel (.xlsx)
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm border-0">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-3">Agregar / Actualizar Estudiante</h5>
+
+                            @if (!string.IsNullOrEmpty(_formMessage))
+                            {
+                                <div class="alert alert-success py-2 small">@_formMessage</div>
+                            }
+
+                            <div class="mb-2">
+                                <label class="form-label small fw-semibold">ID (Matrícula)</label>
+                                <input type="text" class="form-control" @bind="_newStudent.Id" placeholder="Ej. 20210001" />
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small fw-semibold">Nombre Completo</label>
+                                <input type="text" class="form-control" @bind="_newStudent.Nombre" placeholder="Ej. Ana García" />
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small fw-semibold">Carrera</label>
+                                <input type="text" class="form-control" @bind="_newStudent.Carrera" placeholder="Ej. Ing. en Sistemas" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold">Tema de Tesis</label>
+                                <textarea class="form-control" rows="2" @bind="_newStudent.TemaTesis" placeholder="Título del tema de tesis"></textarea>
+                            </div>
+                            <button class="btn btn-primary w-100" @onclick="SaveStudentAsync">
+                                Guardar Estudiante
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-7">
+                    <div class="card shadow-sm border-0">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="fw-bold mb-0">Listado de Estudiantes</h5>
+                                <input type="text" class="form-control form-control-sm w-50"
+                                       placeholder="Buscar por ID o nombre..."
+                                       @bind="_searchTerm" @bind:event="oninput" />
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle small">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Nombre</th>
+                                            <th>Carrera</th>
+                                            <th>Tema de Tesis</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var s in FilteredStudents)
+                                        {
+                                            <tr>
+                                                <td><span class="badge bg-secondary">@s.Id</span></td>
+                                                <td class="fw-semibold">@s.Nombre</td>
+                                                <td>@s.Carrera</td>
+                                                <td>@s.TemaTesis</td>
+                                                <td class="text-end">
+                                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteStudentAsync(s.Id)">
+                                                        Eliminar
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (_activeTab == 1)
+        {
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold mb-0">Resumen de Calificaciones</h5>
+                <button class="btn btn-success btn-sm" @onclick="ExportExcelAsync">
+                    Exportar Resultados (.xlsx)
+                </button>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>ID</th>
+                                <th>Estudiante</th>
+                                <th>Carrera</th>
+                                <th>Tema de Tesis</th>
+                                <th class="text-center">Recibidas</th>
+                                <th class="text-center">Realizadas</th>
+                                <th class="text-center">Promedio</th>
+                                <th>Clasificación</th>
+                                <th>Estado</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _summaries)
+                            {
+                                <tr>
+                                    <td><span class="badge bg-secondary">@row.Student.Id</span></td>
+                                    <td class="fw-semibold">@row.Student.Nombre</td>
+                                    <td class="small">@row.Student.Carrera</td>
+                                    <td class="small">@row.Student.TemaTesis</td>
+                                    <td class="text-center">@row.EvaluationsReceivedCount</td>
+                                    <td class="text-center">@row.EvaluationsGivenCount</td>
+                                    <td class="text-center fw-bold">
+                                        @(row.EvaluationsReceivedCount > 0 ? row.AverageScore.ToString("0.00") : "-")
+                                    </td>
+                                    <td>@row.Classification</td>
+                                    <td>
+                                        @if (row.EvaluationsReceivedCount == 0)
+                                        {
+                                            <span class="badge bg-secondary">Pendiente</span>
+                                        }
+                                        else if (row.Approved)
+                                        {
+                                            <span class="badge bg-success">Aprobado</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-danger">Reprobado</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-outline-primary btn-sm"
+                                                disabled="@(row.EvaluationsReceivedCount == 0)"
+                                                @onclick="() => ViewDetailsAsync(row.Student)">
+                                            Ver Detalle
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            @if (_detailStudent != null)
+            {
+                <div class="card shadow-sm border-primary">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <strong>Detalle de Evaluaciones: @_detailStudent.Nombre (@_detailStudent.Id)</strong>
+                        <button class="btn btn-sm btn-light" @onclick="() => _detailStudent = null">Cerrar</button>
+                    </div>
+                    <div class="card-body">
+                        @foreach (var eval in _detailEvaluations)
+                        {
+                            <div class="border rounded p-3 mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div>
+                                        <strong>Evaluador:</strong> @eval.Evaluator?.Nombre (@eval.EvaluatorId)
+                                    </div>
+                                    <div>
+                                        <span class="badge bg-dark me-1">@eval.TotalScore.ToString("0.00") / 100</span>
+                                        <span class="badge @(eval.Approved ? "bg-success" : "bg-danger")">
+                                            @eval.Classification
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="row g-2 small">
+                                    @foreach (var c in RubricDefinition.Criteria)
+                                    {
+                                        var d = eval.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
+                                        if (d != null)
+                                        {
+                                            <div class="col-md-4">
+                                                <div class="p-2 bg-light rounded">
+                                                    <strong>@c.ShortName:</strong> @d.WeightedPoints.ToString("0.00") / @c.Weight (Nivel @d.Score)
+                                                    @if (!string.IsNullOrWhiteSpace(d.Evidence))
+                                                    {
+                                                        <div class="text-muted fst-italic mt-1">"@d.Evidence"</div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+        else if (_activeTab == 2)
+        {
+            <div class="row g-4">
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-3">Parámetros de Evaluación y Seguridad</h5>
+
+                            @if (!string.IsNullOrEmpty(_settingsMessage))
+                            {
+                                <div class="alert alert-info py-2 small">@_settingsMessage</div>
+                            }
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Mínimo aprobatorio (0 - 100)</label>
+                                <input type="number" step="0.5" min="0" max="100" class="form-control"
+                                       @bind="_minPassingScore" />
+                                <div class="form-text">Puntaje mínimo requerido para marcar a un estudiante como Aprobado.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Nueva contraseña / PIN de docente (opcional)</label>
+                                <input type="password" class="form-control"
+                                       placeholder="Dejar vacío para mantener la actual"
+                                       @bind="_newPinInput" />
+                            </div>
+
+                            <button class="btn btn-primary" @onclick="SaveSettingsAsync">
+                                Guardar Configuración
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-danger">
+                        <div class="card-body">
+                            <h5 class="fw-bold text-danger mb-2">Resetear Sistema desde 0</h5>
+                            <p class="text-muted small mb-3">
+                                Elimina permanentemente todo el listado de estudiantes, todas las evaluaciones registradas
+                                y cierra cualquier evaluación activa.
+                            </p>
+
+                            @if (!_confirmReset)
+                            {
+                                <button class="btn btn-outline-danger" @onclick="() => _confirmReset = true">
+                                    Eliminar listado y resetear todo
+                                </button>
+                            }
+                            else
+                            {
+                                <div class="alert alert-danger py-2 small">
+                                    <strong>¿Estás seguro?</strong> Esta acción no se puede deshacer.
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-danger" @onclick="ResetAllAsync">
+                                        Sí, eliminar todo
+                                    </button>
+                                    <button class="btn btn-secondary" @onclick="() => _confirmReset = false">
+                                        Cancelar
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string _pinInput = string.Empty;
+    private string? _pinError;
+    private int _activeTab = 0;
+
+    private List<Student> _students = new();
+    private List<StudentSummary> _summaries = new();
+    private string _searchTerm = string.Empty;
+
+    private Student _newStudent = new();
+    private string? _formMessage;
+    private bool _isUploading;
+    private ImportResult? _importResult;
+
+    private Student? _detailStudent;
+    private List<Evaluation> _detailEvaluations = new();
+
+    private EvaluationState _evalState = new();
+    private Student? _activeStudent;
+    private string _selectedActiveStudentId = string.Empty;
+    private string? _orchestrationMessage;
+
+    private double _minPassingScore = 70.0;
+    private string _newPinInput = string.Empty;
+    private string? _settingsMessage;
+    private bool _confirmReset;
+
+    private IEnumerable<Student> FilteredStudents =>
+        string.IsNullOrWhiteSpace(_searchTerm)
+            ? _students
+            : _students.Where(s =>
+                s.Id.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                s.Nombre.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.IsTeacherAuthenticated)
+        {
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task HandlePinKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await VerifyPin();
+    }
+
+    private async Task VerifyPin()
+    {
+        if (await EvalService.ValidateTeacherPinAsync(_pinInput))
+        {
+            Session.IsTeacherAuthenticated = true;
+            _pinError = null;
+            await LoadDataAsync();
+        }
+        else
+        {
+            _pinError = "PIN incorrecto.";
+        }
+    }
+
+    private void LogoutTeacher()
+    {
+        Session.IsTeacherAuthenticated = false;
+        _pinInput = string.Empty;
+    }
+
+    private async Task SwitchTab(int tab)
+    {
+        _activeTab = tab;
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _students = await EvalService.GetAllStudentsAsync();
+        _summaries = await EvalService.GetTeacherSummariesAsync();
+        var (state, active) = await EvalService.GetEvaluationStateAsync();
+        _evalState = state;
+        _activeStudent = active;
+        _minPassingScore = state.MinPassingScore;
+        if (string.IsNullOrEmpty(_selectedActiveStudentId) && !string.IsNullOrEmpty(state.ActiveStudentId))
+        {
+            _selectedActiveStudentId = state.ActiveStudentId;
+        }
+    }
+
+    private async Task StartEvaluationAsync()
+    {
+        var (ok, msg) = await EvalService.StartEvaluationAsync(_selectedActiveStudentId);
+        _orchestrationMessage = msg;
+        await LoadDataAsync();
+    }
+
+    private async Task CloseEvaluationAsync()
+    {
+        await EvalService.CloseEvaluationAsync();
+        _orchestrationMessage = "Evaluación cerrada.";
+        await LoadDataAsync();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        var (ok, msg) = await EvalService.UpdateSettingsAsync(_minPassingScore, _newPinInput);
+        _settingsMessage = msg;
+        if (ok)
+        {
+            _newPinInput = string.Empty;
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task ResetAllAsync()
+    {
+        await EvalService.ResetAllDataAsync();
+        _confirmReset = false;
+        _selectedActiveStudentId = string.Empty;
+        _detailStudent = null;
+        _settingsMessage = "Sistema reseteado desde 0 correctamente.";
+        await LoadDataAsync();
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _importResult = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            _importResult = await ImportService.ImportFromStreamAsync(stream, file.Name);
+            await LoadDataAsync();
+        }
+        finally
+        {
+            _isUploading = false;
+        }
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        var bytes = ImportService.GenerateTemplateExcel();
+        await JS.InvokeVoidAsync("downloadFileFromBytes", "Plantilla_Estudiantes.xlsx", Convert.ToBase64String(bytes));
+    }
+
+    private async Task SaveStudentAsync()
+    {
+        var (ok, msg) = await EvalService.AddOrUpdateStudentAsync(_newStudent);
+        _formMessage = msg;
+        if (ok)
+        {
+            _newStudent = new Student();
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task DeleteStudentAsync(string id)
+    {
+        await EvalService.DeleteStudentAsync(id);
+        await LoadDataAsync();
+    }
+
+    private async Task ViewDetailsAsync(Student student)
+    {
+        _detailStudent = student;
+        _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(student.Id);
+    }
+
+    private async Task ExportExcelAsync()
+    {
+        var bytes = await EvalService.ExportResultsExcelAsync();
+        await JS.InvokeVoidAsync("downloadFileFromBytes", "Resultados_Heteroevaluacion.xlsx", Convert.ToBase64String(bytes));
+    }
+}

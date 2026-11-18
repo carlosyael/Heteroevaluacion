@@ -1,0 +1,44 @@
+@page "/"
+
+<PageTitle>Heteroevaluación de Tesis</PageTitle>
+
+<div class="container py-5">
+    <div class="text-center mb-5">
+        <h1 class="display-5 fw-bold">Sistema de Heteroevaluación de Tesis</h1>
+        <p class="lead text-muted">
+            Plataforma de evaluación entre pares orquestada por el docente.
+        </p>
+    </div>
+
+    <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-body p-4 d-flex flex-column">
+                    <h3 class="card-title fw-bold mb-3">Portal de Estudiantes</h3>
+                    <p class="card-text text-muted flex-grow-1">
+                        Accede con tu ID de estudiante registrado para evaluar las tesis de tus compañeros.
+                        Solo puedes calificar una vez a cada compañero y no puedes evaluarte a ti mismo.
+                    </p>
+                    <a href="/estudiante" class="btn btn-primary btn-lg mt-3">
+                        Ingresar como Estudiante
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-body p-4 d-flex flex-column">
+                    <h3 class="card-title fw-bold mb-3">Backoffice del Maestro</h3>
+                    <p class="card-text text-muted flex-grow-1">
+                        Carga el listado inicial de estudiantes mediante CSV o Excel (ID, Nombre, Carrera, Tema de Tesis),
+                        gestiona registros y consulta los resultados y promedios en tiempo real.
+                    </p>
+                    <a href="/maestro" class="btn btn-dark btn-lg mt-3">
+                        Ingresar al Backoffice
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

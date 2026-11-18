@@ -1,0 +1,390 @@
+@page "/estudiante"
+@rendermode InteractiveServer
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject EvaluationService EvalService
+@inject SessionService Session
+
+<PageTitle>Portal de Estudiantes - Heteroevaluación</PageTitle>
+
+@if (Session.CurrentStudent == null)
+{
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-md-5">
+                <div class="card shadow-sm border-0">
+                    <div class="card-body p-4">
+                        <h3 class="fw-bold mb-2">Portal de Estudiantes</h3>
+                        <p class="text-muted small mb-4">
+                            Ingresa tu ID de estudiante (matrícula) cargado por el maestro para acceder.
+                        </p>
+
+                        @if (!string.IsNullOrEmpty(_loginError))
+                        {
+                            <div class="alert alert-danger py-2">@_loginError</div>
+                        }
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">ID de Estudiante</label>
+                            <input type="text" class="form-control form-control-lg"
+                                   placeholder="Ej. 20210001"
+                                   @bind="_loginId"
+                                   @bind:event="oninput"
+                                   @onkeydown="HandleLoginKeyDown" />
+                        </div>
+
+                        <button class="btn btn-primary w-100 btn-lg" @onclick="LoginAsync" disabled="@_isLoading">
+                            @(_isLoading ? "Validando..." : "Acceder")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (_selectedTarget == null)
+{
+    <div class="container py-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+            <div>
+                <h2 class="fw-bold mb-1">Bienvenido, @Session.CurrentStudent.Nombre</h2>
+                <div class="text-muted">
+                    <strong>ID:</strong> @Session.CurrentStudent.Id &middot;
+                    <strong>Carrera:</strong> @Session.CurrentStudent.Carrera
+                </div>
+                <div class="text-muted small">
+                    <strong>Tu Tema de Tesis:</strong> @Session.CurrentStudent.TemaTesis
+                </div>
+            </div>
+            <button class="btn btn-outline-secondary" @onclick="Logout">Cerrar sesión</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_statusMessage))
+        {
+            <div class="alert alert-success alert-dismissible fade show">
+                @_statusMessage
+                <button type="button" class="btn-close" @onclick="() => _statusMessage = null"></button>
+            </div>
+        }
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="fw-bold mb-0">Evaluación Activa</h4>
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadClassmatesAsync">
+                Actualizar estado
+            </button>
+        </div>
+
+        @if (!_evalState.IsOpen || _activeTarget == null)
+        {
+            <div class="alert alert-warning">
+                No hay ninguna evaluación activa en este momento. Espera a que el maestro inicie el proceso.
+            </div>
+        }
+        else if (_activeTarget.Id == Session.CurrentStudent.Id)
+        {
+            <div class="alert alert-info">
+                Eres el estudiante que está siendo evaluado actualmente (<strong>@_activeTarget.Nombre</strong>). No puedes evaluarte a ti mismo.
+            </div>
+        }
+        else
+        {
+            var activeStatus = _classmates.FirstOrDefault(c => c.Student.Id == _activeTarget.Id);
+            if (activeStatus != null)
+            {
+                <div class="row g-3">
+                    <div class="col-md-6 col-lg-5">
+                        <div class="card h-100 shadow-sm border-primary">
+                            <div class="card-body d-flex flex-column">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <span class="badge bg-secondary">@activeStatus.Student.Id</span>
+                                    @if (activeStatus.AlreadyEvaluated)
+                                    {
+                                        <span class="badge bg-success">Evaluado (@activeStatus.ScoreGiven?.ToString("0.0"))</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark">Pendiente</span>
+                                    }
+                                </div>
+                                <h5 class="card-title fw-bold mb-1">@activeStatus.Student.Nombre</h5>
+                                <p class="text-muted small mb-2">@activeStatus.Student.Carrera</p>
+                                <p class="card-text small flex-grow-1">
+                                    <strong>Tesis:</strong> @activeStatus.Student.TemaTesis
+                                </p>
+                                @if (activeStatus.AlreadyEvaluated)
+                                {
+                                    <button class="btn btn-outline-success w-100 mt-2" disabled>
+                                        Ya calificado (@activeStatus.ClassificationGiven)
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-primary w-100 mt-2" @onclick="() => StartEvaluation(activeStatus.Student)">
+                                        Evaluar Tesis
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+}
+else
+{
+    <div class="hetero-shell p-3 p-md-4 rounded-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+            <div>
+                <h3 class="fw-bold mb-1">Heteroevaluación de tesis</h3>
+                <div class="text-light opacity-75">
+                    Evaluando a: <strong>@_selectedTarget.Nombre</strong> (@_selectedTarget.Id) &middot; @_selectedTarget.Carrera
+                </div>
+                <div class="small text-light opacity-75">
+                    <strong>Tema:</strong> @_selectedTarget.TemaTesis
+                </div>
+            </div>
+            <button class="btn btn-outline-light btn-sm" @onclick="CancelEvaluation">
+                &larr; Volver al listado
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_evalError))
+        {
+            <div class="alert alert-danger">@_evalError</div>
+        }
+
+        <div class="row g-4">
+            <div class="col-lg-8 d-flex flex-column gap-3">
+                @foreach (var criterion in RubricDefinition.Criteria)
+                {
+                    int currentScore = _scores[criterion.Key];
+                    var selectedLevel = criterion.Levels.First(l => l.Score == currentScore);
+                    double weighted = RubricDefinition.CalculateWeighted(criterion.Weight, currentScore);
+
+                    <div class="hetero-card">
+                        <div class="criterion-header">
+                            <div class="criterion-title">
+                                @criterion.FullTitle
+                                <span class="criterion-chapter">@criterion.ChapterTag</span>
+                            </div>
+                            <div class="criterion-weight">Peso @criterion.Weight%</div>
+                        </div>
+
+                        <div class="score-grid">
+                            @foreach (var lvl in criterion.Levels)
+                            {
+                                bool isActive = lvl.Score == currentScore;
+                                <button type="button"
+                                        class="score-btn @(isActive ? "active" : "")"
+                                        @onclick="() => _scores[criterion.Key] = lvl.Score">
+                                    <span class="score-num">@lvl.Score</span>
+                                    <span class="score-label">@lvl.Label</span>
+                                </button>
+                            }
+                        </div>
+
+                        <div class="rubric-desc-box">
+                            <strong>@selectedLevel.Label (@selectedLevel.Score):</strong> @selectedLevel.Description
+                        </div>
+
+                        <label class="evidence-label">Evidencia u observación</label>
+                        <textarea class="evidence-input"
+                                  rows="2"
+                                  placeholder="Escribe observaciones o evidencias para este criterio..."
+                                  @bind="_evidences[criterion.Key]"></textarea>
+
+                        <div class="weighted-points-text">
+                            Puntos ponderados: <strong>@weighted.ToString("0.00")</strong> de @criterion.Weight
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="col-lg-4">
+                <div class="resultado-sticky">
+                    <div class="resultado-card">
+                        <h4 class="fw-bold mb-2">Resultado</h4>
+
+                        @{
+                            double total = CalculateTotal();
+                            string classification = RubricDefinition.Classify(total);
+                            bool approved = total >= _evalState.MinPassingScore;
+                            double radius = 44;
+                            double circumference = 2 * Math.PI * radius;
+                            double dashOffset = circumference * (1.0 - Math.Clamp(total, 0, 100) / 100.0);
+                        }
+
+                        <div class="gauge-row">
+                            <svg width="110" height="110" viewBox="0 0 110 110">
+                                <circle cx="55" cy="55" r="@radius"
+                                        fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="11" />
+                                <circle cx="55" cy="55" r="@radius"
+                                        fill="none" stroke="#f5c451" stroke-width="11"
+                                        stroke-linecap="round"
+                                        stroke-dasharray="@circumference.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"
+                                        stroke-dashoffset="@dashOffset.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"
+                                        transform="rotate(-90 55 55)" />
+                            </svg>
+                            <div>
+                                <div class="score-big">@total.ToString("0.0")</div>
+                                <div class="score-max">/ 100</div>
+                                <div class="classification-text">@classification</div>
+                                <span class="status-pill @(approved ? "approved" : "failed")">
+                                    @(approved ? "Aprobado" : "Reprobado")
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            @foreach (var criterion in RubricDefinition.Criteria)
+                            {
+                                double w = RubricDefinition.CalculateWeighted(criterion.Weight, _scores[criterion.Key]);
+                                double pct = (w / criterion.Weight) * 100.0;
+                                <div class="breakdown-row">
+                                    <span class="text-truncate">@criterion.ShortName</span>
+                                    <div class="breakdown-bar-bg">
+                                        <div class="breakdown-bar-fill" style="width: @pct.ToString("0", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                                    </div>
+                                    <span class="text-end fw-semibold">@w.ToString("0.00")</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="legend-footer">
+                            Mínimo aprobatorio: @_evalState.MinPassingScore &middot; Excelente &ge; 90 &middot; Bueno &ge; 80 &middot;
+                            Satisfactorio &ge; 70 &middot; Deficiente &ge; 50
+                        </div>
+
+                        <button class="btn btn-warning w-100 fw-bold mt-3 py-2"
+                                @onclick="SubmitEvaluationAsync"
+                                disabled="@_isSubmitting">
+                            @(_isSubmitting ? "Guardando..." : "Enviar Evaluación")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _loginId = string.Empty;
+    private string? _loginError;
+    private string? _statusMessage;
+    private string? _evalError;
+    private bool _isLoading;
+    private bool _isSubmitting;
+
+    private List<ClassmateStatus> _classmates = new();
+    private EvaluationState _evalState = new();
+    private Student? _activeTarget;
+    private Student? _selectedTarget;
+    private Dictionary<string, int> _scores = new();
+    private Dictionary<string, string> _evidences = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.CurrentStudent != null)
+        {
+            await LoadClassmatesAsync();
+        }
+    }
+
+    private async Task HandleLoginKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LoginAsync();
+    }
+
+    private async Task LoginAsync()
+    {
+        _loginError = null;
+        _isLoading = true;
+        try
+        {
+            var student = await EvalService.ValidateStudentAsync(_loginId);
+            if (student == null)
+            {
+                _loginError = "ID no encontrado en el listado inicial del maestro.";
+                return;
+            }
+            Session.CurrentStudent = student;
+            await LoadClassmatesAsync();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void Logout()
+    {
+        Session.CurrentStudent = null;
+        _selectedTarget = null;
+        _classmates.Clear();
+        _loginId = string.Empty;
+    }
+
+    private async Task LoadClassmatesAsync()
+    {
+        if (Session.CurrentStudent == null) return;
+        _classmates = await EvalService.GetClassmatesForEvaluatorAsync(Session.CurrentStudent.Id);
+        var (state, active) = await EvalService.GetEvaluationStateAsync();
+        _evalState = state;
+        _activeTarget = active;
+    }
+
+    private void StartEvaluation(Student target)
+    {
+        _selectedTarget = target;
+        _evalError = null;
+        _scores = RubricDefinition.Criteria.ToDictionary(c => c.Key, _ => 4);
+        _evidences = RubricDefinition.Criteria.ToDictionary(c => c.Key, _ => string.Empty);
+    }
+
+    private void CancelEvaluation()
+    {
+        _selectedTarget = null;
+        _evalError = null;
+    }
+
+    private double CalculateTotal()
+    {
+        double sum = 0;
+        foreach (var c in RubricDefinition.Criteria)
+            sum += RubricDefinition.CalculateWeighted(c.Weight, _scores[c.Key]);
+        return Math.Round(sum, 2);
+    }
+
+    private async Task SubmitEvaluationAsync()
+    {
+        if (Session.CurrentStudent == null || _selectedTarget == null) return;
+        _isSubmitting = true;
+        _evalError = null;
+        try
+        {
+            var inputs = RubricDefinition.Criteria
+                .Select(c => new CriterionInput(c.Key, _scores[c.Key], _evidences[c.Key]))
+                .ToList();
+
+            var (ok, msg) = await EvalService.SubmitEvaluationAsync(
+                Session.CurrentStudent.Id,
+                _selectedTarget.Id,
+                inputs);
+
+            if (!ok)
+            {
+                _evalError = msg;
+                return;
+            }
+
+            _statusMessage = $"Evaluación para {_selectedTarget.Nombre} registrada con éxito.";
+            _selectedTarget = null;
+            await LoadClassmatesAsync();
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}

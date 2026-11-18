@@ -1,0 +1,36 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: heteroevaluacion-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: heteroevaluacion
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: heteroevaluacion-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Server=db;Port=3306;Database=heteroevaluacion;User=root;Password=rootpassword;"
+      TEACHER_PIN: "profesor2026"
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql_data:
