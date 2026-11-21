@@ -200,18 +200,24 @@ else
                         </div>
                     </div>
 
-                    <div class="card shadow-sm border-0">
+                    <div class="card shadow-sm @(_isEditingStudent ? "border-warning" : "border-0")">
                         <div class="card-body">
-                            <h5 class="fw-bold mb-3">Agregar / Actualizar Estudiante</h5>
+                            <h5 class="fw-bold mb-3">
+                                @(_isEditingStudent ? $"Editando Estudiante ({_newStudent.Id})" : "Agregar Estudiante")
+                            </h5>
 
                             @if (!string.IsNullOrEmpty(_formMessage))
                             {
-                                <div class="alert alert-success py-2 small">@_formMessage</div>
+                                <div class="alert @(_formIsError ? "alert-danger" : "alert-success") py-2 small">@_formMessage</div>
                             }
 
                             <div class="mb-2">
                                 <label class="form-label small fw-semibold">ID (Matrícula)</label>
-                                <input type="text" class="form-control" @bind="_newStudent.Id" placeholder="Ej. 20210001" />
+                                <input type="text" class="form-control" @bind="_newStudent.Id" placeholder="Ej. 20210001" disabled="@_isEditingStudent" />
+                                @if (_isEditingStudent)
+                                {
+                                    <div class="form-text">La matrícula no se edita para conservar el historial de evaluaciones.</div>
+                                }
                             </div>
                             <div class="mb-2">
                                 <label class="form-label small fw-semibold">Nombre Completo</label>
@@ -225,9 +231,17 @@ else
                                 <label class="form-label small fw-semibold">Tema de Tesis</label>
                                 <textarea class="form-control" rows="2" @bind="_newStudent.TemaTesis" placeholder="Título del tema de tesis"></textarea>
                             </div>
-                            <button class="btn btn-primary w-100" @onclick="SaveStudentAsync">
-                                Guardar Estudiante
-                            </button>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-primary flex-grow-1" @onclick="SaveStudentAsync">
+                                    @(_isEditingStudent ? "Actualizar Estudiante" : "Guardar Estudiante")
+                                </button>
+                                @if (_isEditingStudent)
+                                {
+                                    <button class="btn btn-outline-secondary" @onclick="CancelEditStudent">
+                                        Cancelar
+                                    </button>
+                                }
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -256,7 +270,7 @@ else
                                     <tbody>
                                         @foreach (var s in FilteredStudents)
                                         {
-                                            <tr>
+                                            <tr class="@(_isEditingStudent && _newStudent.Id == s.Id ? "table-warning" : "")">
                                                 <td><span class="badge bg-secondary">@s.Id</span></td>
                                                 <td class="fw-semibold">@s.Nombre</td>
                                                 <td>@s.Carrera</td>
@@ -275,9 +289,14 @@ else
                                                     }
                                                     else
                                                     {
-                                                        <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteStudentId = s.Id">
-                                                            Eliminar
-                                                        </button>
+                                                        <div class="d-flex justify-content-end gap-1">
+                                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEditStudent(s)">
+                                                                Editar
+                                                            </button>
+                                                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteStudentId = s.Id">
+                                                                Eliminar
+                                                            </button>
+                                                        </div>
                                                     }
                                                 </td>
                                             </tr>
@@ -642,6 +661,8 @@ else
     private string _searchTerm = string.Empty;
 
     private Student _newStudent = new();
+    private bool _isEditingStudent;
+    private bool _formIsError;
     private string? _formMessage;
     private bool _isUploading;
     private ImportResult? _importResult;
@@ -889,12 +910,37 @@ else
         await JS.InvokeVoidAsync("downloadFileFromBytes", "Plantilla_Estudiantes.xlsx", Convert.ToBase64String(bytes));
     }
 
+    private void StartEditStudent(Student s)
+    {
+        _newStudent = new Student
+        {
+            Id = s.Id,
+            Nombre = s.Nombre,
+            Carrera = s.Carrera,
+            TemaTesis = s.TemaTesis
+        };
+        _isEditingStudent = true;
+        _formMessage = null;
+        _formIsError = false;
+        _confirmDeleteStudentId = null;
+    }
+
+    private void CancelEditStudent()
+    {
+        _newStudent = new Student();
+        _isEditingStudent = false;
+        _formMessage = null;
+        _formIsError = false;
+    }
+
     private async Task SaveStudentAsync()
     {
         var (ok, msg) = await EvalService.AddOrUpdateStudentAsync(_newStudent);
+        _formIsError = !ok;
         _formMessage = msg;
         if (ok)
         {
+            _isEditingStudent = false;
             _newStudent = new Student();
             await LoadDataAsync();
         }
@@ -903,6 +949,10 @@ else
     private async Task DeleteStudentAsync(string id)
     {
         _confirmDeleteStudentId = null;
+        if (_isEditingStudent && _newStudent.Id == id)
+        {
+            CancelEditStudent();
+        }
         await EvalService.DeleteStudentAsync(id);
         await LoadDataAsync();
     }
