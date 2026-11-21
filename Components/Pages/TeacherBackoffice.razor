@@ -1,5 +1,6 @@
 @page "/maestro"
 @rendermode InteractiveServer
+@implements IDisposable
 @using HeteroevaluacionApp.Models
 @using HeteroevaluacionApp.Services
 @inject StudentImportService ImportService
@@ -14,9 +15,9 @@
     <div class="container py-5">
         <div class="row justify-content-center">
             <div class="col-md-5">
-                <div class="card shadow-sm border-0">
+                <div class="card portal-card-teacher">
                     <div class="card-body p-4">
-                        <h3 class="fw-bold mb-2">Backoffice del Maestro</h3>
+                        <h3 class="fw-bold mb-2" style="color: #1F3864;">Backoffice del Maestro</h3>
                         <p class="text-muted small mb-4">
                             Ingresa el PIN de docente para gestionar estudiantes y consultar resultados.
                         </p>
@@ -33,10 +34,9 @@
                                    @bind="_pinInput"
                                    @bind:event="oninput"
                                    @onkeydown="HandlePinKeyDown" />
-                            <div class="form-text">PIN por defecto: <code>profesor2026</code></div>
                         </div>
 
-                        <button class="btn btn-dark w-100 btn-lg" @onclick="VerifyPin">
+                        <button class="btn btn-unapec-accent w-100 btn-lg" @onclick="VerifyPin">
                             Ingresar
                         </button>
                     </div>
@@ -101,6 +101,42 @@ else
                 @if (!string.IsNullOrEmpty(_orchestrationMessage))
                 {
                     <div class="alert alert-info py-2 small mt-3 mb-0">@_orchestrationMessage</div>
+                }
+
+                @if (_evalState.IsOpen && _activeStudent != null)
+                {
+                    double pctDone = _activeEligibleCount > 0 ? (_activeReceivedCount * 100.0 / _activeEligibleCount) : 0;
+                    <div class="mt-3 pt-3 border-top">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                            <div class="small fw-semibold" style="color: #1F3864;">
+                                Progreso en vivo: @_activeReceivedCount / @_activeEligibleCount evaluaciones recibidas
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-light text-dark border">En vivo &middot; actualización automática</span>
+                                @if (_pendingEvaluators.Count > 0)
+                                {
+                                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" @onclick="() => _showPendingList = !_showPendingList">
+                                        @(_showPendingList ? "Ocultar pendientes" : $"Ver pendientes ({_pendingEvaluators.Count})")
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div class="progress-bar bg-success"
+                                 role="progressbar"
+                                 style="width: @pctDone.ToString("0", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                        </div>
+
+                        @if (_showPendingList && _pendingEvaluators.Count > 0)
+                        {
+                            <div class="mt-2 d-flex flex-wrap gap-1">
+                                @foreach (var pend in _pendingEvaluators)
+                                {
+                                    <span class="badge bg-warning text-dark">@pend.Id - @pend.Nombre</span>
+                                }
+                            </div>
+                        }
+                    </div>
                 }
             </div>
         </div>
@@ -242,12 +278,43 @@ else
         }
         else if (_activeTab == 1)
         {
-            <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
                 <h5 class="fw-bold mb-0">Resumen de Calificaciones</h5>
-                <button class="btn btn-success btn-sm" @onclick="ExportExcelAsync">
-                    Exportar Resultados (.xlsx)
-                </button>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-primary btn-sm" @onclick="RefreshResultsAsync">
+                        Refrescar
+                    </button>
+                    <button class="btn btn-success btn-sm" @onclick="ExportExcelAsync">
+                        Exportar Resultados (.xlsx)
+                    </button>
+                    <button class="btn btn-primary btn-sm"
+                            disabled="@(!_summaries.Any(s => s.EvaluationsReceivedCount > 0))"
+                            @onclick="ExportAllRubricsZipAsync">
+                        Rúbricas (.zip)
+                    </button>
+                    @if (!_confirmDeleteAllEvals)
+                    {
+                        <button class="btn btn-outline-danger btn-sm"
+                                disabled="@(!_summaries.Any(s => s.EvaluationsReceivedCount > 0))"
+                                @onclick="() => _confirmDeleteAllEvals = true">
+                            Eliminar todas las calificaciones
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="d-flex align-items-center gap-1 bg-danger-subtle px-2 py-1 rounded">
+                            <span class="small text-danger fw-semibold">¿Borrar todas?</span>
+                            <button class="btn btn-danger btn-sm py-0" @onclick="DeleteAllEvaluationsAsync">Sí, eliminar</button>
+                            <button class="btn btn-secondary btn-sm py-0" @onclick="() => _confirmDeleteAllEvals = false">Cancelar</button>
+                        </div>
+                    }
+                </div>
             </div>
+
+            @if (!string.IsNullOrEmpty(_exportError))
+            {
+                <div class="alert alert-danger py-2 small">@_exportError</div>
+            }
 
             <div class="card shadow-sm border-0 mb-4">
                 <div class="table-responsive">
@@ -295,11 +362,35 @@ else
                                         }
                                     </td>
                                     <td class="text-end">
-                                        <button class="btn btn-outline-primary btn-sm"
-                                                disabled="@(row.EvaluationsReceivedCount == 0)"
-                                                @onclick="() => ViewDetailsAsync(row.Student)">
-                                            Ver Detalle
-                                        </button>
+                                        <div class="d-flex justify-content-end gap-1">
+                                            <button class="btn btn-outline-success btn-sm"
+                                                    disabled="@(row.EvaluationsReceivedCount == 0)"
+                                                    @onclick="() => ExportStudentRubricAsync(row.Student.Id)">
+                                                Rúbrica (.xlsx)
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-sm"
+                                                    disabled="@(row.EvaluationsReceivedCount == 0)"
+                                                    @onclick="() => ViewDetailsAsync(row.Student)">
+                                                Ver Detalle
+                                            </button>
+                                            @if (_confirmClearStudentId == row.Student.Id)
+                                            {
+                                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteStudentEvaluationsAsync(row.Student.Id)">
+                                                    Confirmar
+                                                </button>
+                                                <button class="btn btn-secondary btn-sm" @onclick="() => _confirmClearStudentId = null">
+                                                    Cancelar
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-outline-danger btn-sm"
+                                                        disabled="@(row.EvaluationsReceivedCount == 0)"
+                                                        @onclick="() => _confirmClearStudentId = row.Student.Id">
+                                                    Limpiar
+                                                </button>
+                                            }
+                                        </div>
                                     </td>
                                 </tr>
                             }
@@ -310,8 +401,8 @@ else
 
             @if (_detailStudent != null)
             {
-                <div class="card shadow-sm border-primary">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-unapec d-flex justify-content-between align-items-center">
                         <strong>Detalle de Evaluaciones: @_detailStudent.Nombre (@_detailStudent.Id)</strong>
                         <button class="btn btn-sm btn-light" @onclick="() => _detailStudent = null">Cerrar</button>
                     </div>
@@ -325,9 +416,27 @@ else
                                     </div>
                                     <div>
                                         <span class="badge bg-dark me-1">@eval.TotalScore.ToString("0.00") / 100</span>
-                                        <span class="badge @(eval.Approved ? "bg-success" : "bg-danger")">
+                                        <span class="badge @(eval.Approved ? "bg-success" : "bg-danger") me-2">
                                             @eval.Classification
                                         </span>
+                                        <button class="btn btn-outline-success btn-sm me-1" @onclick="() => ExportSingleEvaluationRubricAsync(eval.Id)">
+                                            Rúbrica (.xlsx)
+                                        </button>
+                                        @if (_confirmDeleteEvalId == eval.Id)
+                                        {
+                                            <button class="btn btn-danger btn-sm me-1" @onclick="() => DeleteSingleEvaluationAsync(eval.Id)">
+                                                Confirmar
+                                            </button>
+                                            <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteEvalId = null">
+                                                Cancelar
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteEvalId = eval.Id">
+                                                Eliminar
+                                            </button>
+                                        }
                                     </div>
                                 </div>
                                 <div class="row g-2 small">
@@ -366,6 +475,20 @@ else
                             {
                                 <div class="alert alert-info py-2 small">@_settingsMessage</div>
                             }
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Nombre del Profesor (para la Rúbrica)</label>
+                                <input type="text" class="form-control"
+                                       placeholder="Ricardo Cesar Reinoso Rodriguez"
+                                       @bind="_teacherName" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Carrera / Programa (Encabezado de Rúbrica)</label>
+                                <input type="text" class="form-control"
+                                       placeholder="Maestría en Enseñanza de la Matemática en el Nivel Secundario"
+                                       @bind="_programName" />
+                            </div>
 
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Mínimo aprobatorio (0 - 100)</label>
@@ -421,6 +544,73 @@ else
                     </div>
                 </div>
             </div>
+
+            <div class="card shadow-sm border-0 mt-4">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                        <div>
+                            <h5 class="fw-bold mb-0">Criterios de Evaluación y Pesos (%)</h5>
+                            <span class="text-muted small">Ajusta el nombre, etiqueta, peso (%) o desactiva criterios. La suma activa debe ser 100%.</span>
+                        </div>
+                        @{
+                            double activeSum = Math.Round(_criterionConfigs.Where(c => c.IsActive).Sum(c => c.Weight), 2);
+                        }
+                        <span class="badge @(Math.Abs(activeSum - 100.0) <= 0.01 ? "bg-success" : "bg-danger") fs-6">
+                            Total Activo: @activeSum.ToString("0.##")%
+                        </span>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_criteriaMessage))
+                    {
+                        <div class="alert alert-info py-2 small">@_criteriaMessage</div>
+                    }
+
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Activo</th>
+                                    <th>Nombre Corto</th>
+                                    <th>Título Completo</th>
+                                    <th>Etiqueta</th>
+                                    <th style="width: 110px;">Peso (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var cfg in _criterionConfigs)
+                                {
+                                    <tr>
+                                        <td>
+                                            <input type="checkbox" class="form-check-input" @bind="cfg.IsActive" />
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control form-control-sm" @bind="cfg.ShortName" />
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control form-control-sm" @bind="cfg.FullTitle" />
+                                        </td>
+                                        <td>
+                                            <input type="text" class="form-control form-control-sm" @bind="cfg.ChapterTag" />
+                                        </td>
+                                        <td>
+                                            <input type="number" step="0.5" min="0" max="100" class="form-control form-control-sm" @bind="cfg.Weight" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveCriteriaAsync">
+                            Guardar Criterios y Pesos
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="ResetCriteriaAsync">
+                            Restaurar valores por defecto
+                        </button>
+                    </div>
+                </div>
+            </div>
         }
     </div>
 }
@@ -448,9 +638,26 @@ else
     private string? _orchestrationMessage;
 
     private double _minPassingScore = 70.0;
+    private string _teacherName = "Ricardo Cesar Reinoso Rodriguez";
+    private string _programName = "Maestría en Enseñanza de la Matemática en el Nivel Secundario";
     private string _newPinInput = string.Empty;
     private string? _settingsMessage;
+    private string? _exportError;
     private bool _confirmReset;
+    private bool _confirmDeleteAllEvals;
+    private string? _confirmClearStudentId;
+    private int? _confirmDeleteEvalId;
+
+    private List<Student> _pendingEvaluators = new();
+    private int _activeReceivedCount;
+    private int _activeEligibleCount;
+    private bool _showPendingList;
+    private System.Threading.Timer? _liveTimer;
+    private bool _disposed;
+    private bool _isRefreshingLive;
+
+    private List<CriterionConfig> _criterionConfigs = new();
+    private string? _criteriaMessage;
 
     private IEnumerable<Student> FilteredStudents =>
         string.IsNullOrWhiteSpace(_searchTerm)
@@ -488,6 +695,7 @@ else
 
     private void LogoutTeacher()
     {
+        StopLiveTimer();
         Session.IsTeacherAuthenticated = false;
         _pinInput = string.Empty;
     }
@@ -502,14 +710,94 @@ else
     {
         _students = await EvalService.GetAllStudentsAsync();
         _summaries = await EvalService.GetTeacherSummariesAsync();
+        _criterionConfigs = await EvalService.GetCriterionConfigsAsync();
         var (state, active) = await EvalService.GetEvaluationStateAsync();
         _evalState = state;
         _activeStudent = active;
         _minPassingScore = state.MinPassingScore;
+        _teacherName = state.TeacherName;
+        _programName = state.ProgramName;
         if (string.IsNullOrEmpty(_selectedActiveStudentId) && !string.IsNullOrEmpty(state.ActiveStudentId))
         {
             _selectedActiveStudentId = state.ActiveStudentId;
         }
+        await RefreshLiveProgressInternalAsync();
+        SyncLiveTimer();
+    }
+
+    private async Task RefreshLiveProgressInternalAsync()
+    {
+        if (_evalState.IsOpen && _activeStudent != null)
+        {
+            var activeEvals = await EvalService.GetEvaluationsForStudentAsync(_activeStudent.Id);
+            var doneIds = activeEvals.Select(e => e.EvaluatorId).ToHashSet();
+            _pendingEvaluators = _students
+                .Where(s => s.Id != _activeStudent.Id && !doneIds.Contains(s.Id))
+                .ToList();
+            _activeEligibleCount = Math.Max(0, _students.Count - 1);
+            _activeReceivedCount = _activeEligibleCount - _pendingEvaluators.Count;
+        }
+        else
+        {
+            _pendingEvaluators.Clear();
+            _activeEligibleCount = 0;
+            _activeReceivedCount = 0;
+            _showPendingList = false;
+        }
+    }
+
+    private void SyncLiveTimer()
+    {
+        if (Session.IsTeacherAuthenticated && _evalState.IsOpen && !_disposed)
+        {
+            _liveTimer ??= new System.Threading.Timer(_ =>
+            {
+                if (_disposed || _isRefreshingLive) return;
+                _ = InvokeAsync(async () =>
+                {
+                    if (_disposed || _isRefreshingLive) return;
+                    _isRefreshingLive = true;
+                    try
+                    {
+                        _summaries = await EvalService.GetTeacherSummariesAsync();
+                        var (state, active) = await EvalService.GetEvaluationStateAsync();
+                        _evalState = state;
+                        _activeStudent = active;
+                        await RefreshLiveProgressInternalAsync();
+                        if (_detailStudent != null)
+                        {
+                            _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
+                        }
+                        if (!_evalState.IsOpen) StopLiveTimer();
+                        StateHasChanged();
+                    }
+                    catch
+                    {
+                        // Ignore transient circuit/timer teardown races
+                    }
+                    finally
+                    {
+                        _isRefreshingLive = false;
+                    }
+                });
+            }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        }
+        else
+        {
+            StopLiveTimer();
+        }
+    }
+
+    private void StopLiveTimer()
+    {
+        _liveTimer?.Dispose();
+        _liveTimer = null;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        StopLiveTimer();
     }
 
     private async Task StartEvaluationAsync()
@@ -528,7 +816,7 @@ else
 
     private async Task SaveSettingsAsync()
     {
-        var (ok, msg) = await EvalService.UpdateSettingsAsync(_minPassingScore, _newPinInput);
+        var (ok, msg) = await EvalService.UpdateSettingsAsync(_minPassingScore, _newPinInput, _teacherName, _programName);
         _settingsMessage = msg;
         if (ok)
         {
@@ -544,6 +832,20 @@ else
         _selectedActiveStudentId = string.Empty;
         _detailStudent = null;
         _settingsMessage = "Sistema reseteado desde 0 correctamente.";
+        await LoadDataAsync();
+    }
+
+    private async Task SaveCriteriaAsync()
+    {
+        var (ok, msg) = await EvalService.SaveCriterionConfigsAsync(_criterionConfigs);
+        _criteriaMessage = msg;
+        if (ok) await LoadDataAsync();
+    }
+
+    private async Task ResetCriteriaAsync()
+    {
+        await EvalService.ResetCriterionConfigsAsync();
+        _criteriaMessage = "Criterios restaurados a los valores por defecto.";
         await LoadDataAsync();
     }
 
@@ -593,9 +895,116 @@ else
         _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(student.Id);
     }
 
+    private async Task RefreshResultsAsync()
+    {
+        await LoadDataAsync();
+        if (_detailStudent != null)
+        {
+            _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
+        }
+    }
+
+    private async Task DeleteSingleEvaluationAsync(int evaluationId)
+    {
+        _confirmDeleteEvalId = null;
+        await EvalService.DeleteEvaluationAsync(evaluationId);
+        await RefreshResultsAsync();
+    }
+
+    private async Task DeleteStudentEvaluationsAsync(string evaluatedId)
+    {
+        _confirmClearStudentId = null;
+        await EvalService.DeleteEvaluationsForStudentAsync(evaluatedId);
+        if (_detailStudent?.Id == evaluatedId)
+        {
+            _detailStudent = null;
+            _detailEvaluations.Clear();
+        }
+        await LoadDataAsync();
+    }
+
+    private async Task DeleteAllEvaluationsAsync()
+    {
+        _confirmDeleteAllEvals = false;
+        await EvalService.DeleteAllEvaluationsAsync();
+        _detailStudent = null;
+        _detailEvaluations.Clear();
+        await LoadDataAsync();
+    }
+
     private async Task ExportExcelAsync()
     {
+        _exportError = null;
         var bytes = await EvalService.ExportResultsExcelAsync();
         await JS.InvokeVoidAsync("downloadFileFromBytes", "Resultados_Heteroevaluacion.xlsx", Convert.ToBase64String(bytes));
+    }
+
+    private async Task ExportStudentRubricAsync(string evaluatedId)
+    {
+        _exportError = null;
+        try
+        {
+            var result = await EvalService.ExportStudentRubricExcelAsync(evaluatedId);
+            if (result == null)
+            {
+                _exportError = "El estudiante seleccionado no tiene evaluaciones registradas.";
+                return;
+            }
+            await JS.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                result.Value.FileName,
+                Convert.ToBase64String(result.Value.Bytes),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        catch (Exception ex)
+        {
+            _exportError = $"Error al generar la rúbrica: {ex.Message}";
+        }
+    }
+
+    private async Task ExportSingleEvaluationRubricAsync(int evaluationId)
+    {
+        _exportError = null;
+        try
+        {
+            var result = await EvalService.ExportSingleEvaluationRubricExcelAsync(evaluationId);
+            if (result == null)
+            {
+                _exportError = "No se encontró la evaluación solicitada.";
+                return;
+            }
+            await JS.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                result.Value.FileName,
+                Convert.ToBase64String(result.Value.Bytes),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        }
+        catch (Exception ex)
+        {
+            _exportError = $"Error al generar la rúbrica individual: {ex.Message}";
+        }
+    }
+
+    private async Task ExportAllRubricsZipAsync()
+    {
+        _exportError = null;
+        try
+        {
+            var result = await EvalService.ExportAllRubricsZipAsync();
+            if (result == null)
+            {
+                _exportError = "No hay estudiantes evaluados para exportar.";
+                return;
+            }
+            await JS.InvokeVoidAsync(
+                "downloadFileFromBytes",
+                result.Value.FileName,
+                Convert.ToBase64String(result.Value.Bytes),
+                "application/zip");
+        }
+        catch (Exception ex)
+        {
+            _exportError = $"Error al generar el archivo ZIP de rúbricas: {ex.Message}";
+        }
     }
 }

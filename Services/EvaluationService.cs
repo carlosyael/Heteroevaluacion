@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using ClosedXML.Excel;
 using HeteroevaluacionApp.Data;
 using HeteroevaluacionApp.Models;
@@ -26,10 +27,25 @@ public record StudentSummary(
 public class EvaluationService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly IWebHostEnvironment _env;
 
-    public EvaluationService(IDbContextFactory<AppDbContext> dbFactory)
+    private static readonly string[] TemplateCriterionKeys =
+    {
+        "planteamiento",
+        "justificacion",
+        "literatura",
+        "metodologia",
+        "resultados",
+        "conclusiones",
+        "apa7",
+        "redaccion",
+        "formato"
+    };
+
+    public EvaluationService(IDbContextFactory<AppDbContext> dbFactory, IWebHostEnvironment env)
     {
         _dbFactory = dbFactory;
+        _env = env;
     }
 
     public async Task<Student?> ValidateStudentAsync(string studentId)
@@ -149,13 +165,84 @@ public class EvaluationService
         return added;
     }
 
+    public async Task<List<CriterionConfig>> GetCriterionConfigsAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var list = await db.CriterionConfigs.AsNoTracking().OrderBy(c => c.Order).ToListAsync();
+        if (list.Count == 0)
+        {
+            list = RubricDefinition.Criteria.Select(c => new CriterionConfig
+            {
+                Key = c.Key,
+                Order = c.Order,
+                ShortName = c.ShortName,
+                FullTitle = c.FullTitle,
+                ChapterTag = c.ChapterTag,
+                Weight = c.Weight,
+                IsActive = true
+            }).ToList();
+            db.CriterionConfigs.AddRange(list);
+            await db.SaveChangesAsync();
+        }
+        return list;
+    }
+
+    public async Task<(bool Success, string Message)> SaveCriterionConfigsAsync(List<CriterionConfig> configs)
+    {
+        var active = configs.Where(c => c.IsActive).ToList();
+        if (active.Count == 0)
+            return (false, "Debe haber al menos un criterio activo.");
+
+        double totalWeight = Math.Round(active.Sum(c => c.Weight), 2);
+        if (Math.Abs(totalWeight - 100.0) > 0.01)
+            return (false, $"La suma de los pesos activos debe ser 100% (actualmente es {totalWeight:0.##}%).");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        foreach (var item in configs)
+        {
+            var existing = await db.CriterionConfigs.FindAsync(item.Key);
+            if (existing != null)
+            {
+                existing.ShortName = item.ShortName.Trim();
+                existing.FullTitle = item.FullTitle.Trim();
+                existing.ChapterTag = item.ChapterTag.Trim();
+                existing.Weight = Math.Round(item.Weight, 2);
+                existing.IsActive = item.IsActive;
+            }
+        }
+        await db.SaveChangesAsync();
+        return (true, "Criterios y pesos guardados correctamente.");
+    }
+
+    public async Task ResetCriterionConfigsAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.CriterionConfigs.ExecuteDeleteAsync();
+        var defaults = RubricDefinition.Criteria.Select(c => new CriterionConfig
+        {
+            Key = c.Key,
+            Order = c.Order,
+            ShortName = c.ShortName,
+            FullTitle = c.FullTitle,
+            ChapterTag = c.ChapterTag,
+            Weight = c.Weight,
+            IsActive = true
+        }).ToList();
+        db.CriterionConfigs.AddRange(defaults);
+        await db.SaveChangesAsync();
+    }
+
     public async Task<bool> ValidateTeacherPinAsync(string pin)
     {
         var (state, _) = await GetEvaluationStateAsync();
         return pin == state.TeacherPin;
     }
 
-    public async Task<(bool Success, string Message)> UpdateSettingsAsync(double minPassingScore, string? newPin)
+    public async Task<(bool Success, string Message)> UpdateSettingsAsync(
+        double minPassingScore,
+        string? newPin,
+        string? teacherName = null,
+        string? programName = null)
     {
         if (minPassingScore < 0 || minPassingScore > 100)
             return (false, "El mínimo aprobatorio debe estar entre 0 y 100.");
@@ -173,9 +260,46 @@ public class EvaluationService
         {
             state.TeacherPin = newPin.Trim();
         }
+        if (!string.IsNullOrWhiteSpace(teacherName))
+        {
+            state.TeacherName = teacherName.Trim();
+        }
+        if (programName != null)
+        {
+            state.ProgramName = programName.Trim();
+        }
         state.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return (true, "Configuración actualizada correctamente.");
+    }
+
+    public async Task DeleteEvaluationAsync(int evaluationId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.EvaluationDetails.Where(d => d.EvaluationId == evaluationId).ExecuteDeleteAsync();
+        await db.Evaluations.Where(e => e.Id == evaluationId).ExecuteDeleteAsync();
+    }
+
+    public async Task DeleteEvaluationsForStudentAsync(string evaluatedId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var evalIds = await db.Evaluations
+            .Where(e => e.EvaluatedId == evaluatedId)
+            .Select(e => e.Id)
+            .ToListAsync();
+
+        if (evalIds.Count > 0)
+        {
+            await db.EvaluationDetails.Where(d => evalIds.Contains(d.EvaluationId)).ExecuteDeleteAsync();
+            await db.Evaluations.Where(e => e.EvaluatedId == evaluatedId).ExecuteDeleteAsync();
+        }
+    }
+
+    public async Task DeleteAllEvaluationsAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.EvaluationDetails.ExecuteDeleteAsync();
+        await db.Evaluations.ExecuteDeleteAsync();
     }
 
     public async Task ResetAllDataAsync()
@@ -222,7 +346,8 @@ public class EvaluationService
         var details = new List<EvaluationDetail>();
         double total = 0;
 
-        foreach (var criterion in RubricDefinition.Criteria)
+        var activeCriteria = (await GetCriterionConfigsAsync()).Where(c => c.IsActive).ToList();
+        foreach (var criterion in activeCriteria)
         {
             var input = inputs.FirstOrDefault(i => i.CriterionKey == criterion.Key);
             int score = Math.Clamp(input?.Score ?? 0, 0, 4);
@@ -424,5 +549,250 @@ public class EvaluationService
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
         return ms.ToArray();
+    }
+
+    public async Task<(byte[] Bytes, string FileName)?> ExportStudentRubricExcelAsync(string evaluatedId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var student = await db.Students.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == evaluatedId);
+        if (student == null) return null;
+
+        var evaluations = await db.Evaluations.AsNoTracking()
+            .Include(e => e.Details)
+            .Where(e => e.EvaluatedId == evaluatedId)
+            .ToListAsync();
+        if (evaluations.Count == 0) return null;
+
+        var avgScores = new Dictionary<string, double>();
+        foreach (var key in TemplateCriterionKeys)
+        {
+            var matching = evaluations
+                .SelectMany(e => e.Details)
+                .Where(d => d.CriterionKey == key)
+                .ToList();
+            avgScores[key] = matching.Count > 0 ? matching.Average(d => d.Score) : 0.0;
+        }
+
+        var (state, _) = await GetEvaluationStateAsync();
+        var configs = await GetCriterionConfigsAsync();
+        var latestDateLocal = evaluations.Max(e => e.CreatedAt).AddHours(-4);
+
+        var bytes = BuildRubricFromTemplate(student, avgScores, latestDateLocal, state, configs);
+        var fileName = $"Rubrica_{SanitizeFilePart(student.Id)}_{SanitizeFilePart(student.Nombre)}.xlsx";
+        return (bytes, fileName);
+    }
+
+    public async Task<(byte[] Bytes, string FileName)?> ExportSingleEvaluationRubricExcelAsync(int evaluationId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var eval = await db.Evaluations.AsNoTracking()
+            .Include(e => e.Evaluated)
+            .Include(e => e.Details)
+            .FirstOrDefaultAsync(e => e.Id == evaluationId);
+        if (eval?.Evaluated == null) return null;
+
+        var scores = new Dictionary<string, double>();
+        foreach (var key in TemplateCriterionKeys)
+        {
+            var det = eval.Details.FirstOrDefault(d => d.CriterionKey == key);
+            scores[key] = det != null ? det.Score : 0.0;
+        }
+
+        var (state, _) = await GetEvaluationStateAsync();
+        var configs = await GetCriterionConfigsAsync();
+        var evalDateLocal = eval.CreatedAt.AddHours(-4);
+
+        var bytes = BuildRubricFromTemplate(eval.Evaluated, scores, evalDateLocal, state, configs);
+        var fileName = $"Rubrica_{SanitizeFilePart(eval.Evaluated.Id)}_{SanitizeFilePart(eval.Evaluated.Nombre)}_Eval_{SanitizeFilePart(eval.EvaluatorId)}.xlsx";
+        return (bytes, fileName);
+    }
+
+    public async Task<(byte[] Bytes, string FileName)?> ExportAllRubricsZipAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var students = await db.Students.AsNoTracking()
+            .Include(s => s.EvaluationsReceived)
+                .ThenInclude(e => e.Details)
+            .Where(s => s.EvaluationsReceived.Any())
+            .OrderBy(s => s.Nombre)
+            .ToListAsync();
+
+        if (students.Count == 0) return null;
+
+        var (state, _) = await GetEvaluationStateAsync();
+        var configs = await GetCriterionConfigsAsync();
+
+        using var zipMs = new MemoryStream();
+        using (var archive = new ZipArchive(zipMs, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var student in students)
+            {
+                var avgScores = new Dictionary<string, double>();
+                foreach (var key in TemplateCriterionKeys)
+                {
+                    var matching = student.EvaluationsReceived
+                        .SelectMany(e => e.Details)
+                        .Where(d => d.CriterionKey == key)
+                        .ToList();
+                    avgScores[key] = matching.Count > 0 ? matching.Average(d => d.Score) : 0.0;
+                }
+
+                var latestDateLocal = student.EvaluationsReceived.Max(e => e.CreatedAt).AddHours(-4);
+                var xlsxBytes = BuildRubricFromTemplate(student, avgScores, latestDateLocal, state, configs);
+                var entryName = $"Rubrica_{SanitizeFilePart(student.Id)}_{SanitizeFilePart(student.Nombre)}.xlsx";
+
+                var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+                using var entryStream = entry.Open();
+                await entryStream.WriteAsync(xlsxBytes);
+            }
+        }
+
+        var zipFileName = $"Rubricas_Estudiantes_{DateTime.UtcNow.AddHours(-4):yyyyMMdd}.zip";
+        return (zipMs.ToArray(), zipFileName);
+    }
+
+    private string ResolveTemplatePath()
+    {
+        var contentPath = Path.Combine(_env.ContentRootPath, "Templates", "RUBRICA_TRABAJO_FINAL.xlsx");
+        if (File.Exists(contentPath)) return contentPath;
+
+        var basePath = Path.Combine(AppContext.BaseDirectory, "Templates", "RUBRICA_TRABAJO_FINAL.xlsx");
+        if (File.Exists(basePath)) return basePath;
+
+        throw new FileNotFoundException("No se encontró la plantilla oficial RUBRICA_TRABAJO_FINAL.xlsx en Templates/.");
+    }
+
+    private byte[] BuildRubricFromTemplate(
+        Student student,
+        Dictionary<string, double> criterionScores0To4,
+        DateTime dateLocal,
+        EvaluationState state,
+        List<CriterionConfig> configs)
+    {
+        var templateBytes = File.ReadAllBytes(ResolveTemplatePath());
+        using var templateMs = new MemoryStream(templateBytes);
+        using var wb = new XLWorkbook(templateMs);
+        var ws = wb.Worksheet("Rúbrica TFM");
+
+        var titleText = string.IsNullOrWhiteSpace(state.ProgramName)
+            ? "RÚBRICA PARA LA EVALUACIÓN DE LOS TRABAJOS FINALES DE POSGRADO"
+            : $"RÚBRICA PARA LA EVALUACIÓN DE LOS TRABAJOS FINALES DE POSGRADO\n({state.ProgramName.Trim()})";
+        ws.Cell("C1").Value = titleText;
+
+        var configMap = configs.ToDictionary(c => c.Key, c => c);
+
+        for (int i = 0; i < TemplateCriterionKeys.Length; i++)
+        {
+            string key = TemplateCriterionKeys[i];
+            int rubricRow = 5 + i;
+            int calcRow = 17 + i;
+
+            configMap.TryGetValue(key, out var cfg);
+            bool isActive = cfg?.IsActive ?? true;
+            double defaultWeight = RubricDefinition.Criteria[i].Weight;
+            double weightFraction = isActive
+                ? Math.Round((cfg?.Weight ?? defaultWeight) / 100.0, 4)
+                : 0.0;
+
+            double score04 = isActive && criterionScores0To4.TryGetValue(key, out var s)
+                ? Math.Round(s, 2)
+                : 0.0;
+
+            string scoreFormat = Math.Abs(score04 - Math.Round(score04)) < 0.005 ? "0" : "0.00";
+
+            var gCell = ws.Cell(rubricRow, 7);
+            gCell.Value = score04;
+            gCell.Style.NumberFormat.Format = scoreFormat;
+
+            var eCell = ws.Cell(calcRow, 5);
+            eCell.Value = weightFraction;
+
+            var bCell = ws.Cell(calcRow, 2);
+            bCell.FormulaA1 = $"G{rubricRow}";
+            bCell.Style.NumberFormat.Format = scoreFormat;
+
+            ws.Cell(calcRow, 4).FormulaA1 = $"B{calcRow}/C{calcRow}";
+            ws.Cell(calcRow, 6).FormulaA1 = $"E{calcRow}*100";
+            ws.Cell(calcRow, 7).FormulaA1 = $"D{calcRow}*F{calcRow}";
+        }
+
+        ws.Cell("G28").Value = state.MinPassingScore;
+
+        // Footer: Nombre (A33:B33)
+        var nombreRange = ws.Range("A33:B33");
+        nombreRange.Merge();
+        var a33 = ws.Cell("A33");
+        a33.Value = student.Nombre;
+        a33.Style.Font.FontName = "Arial";
+        a33.Style.Font.FontSize = 9;
+        a33.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        a33.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        nombreRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+
+        // Footer: Matrícula (C33)
+        var c33 = ws.Cell("C33");
+        c33.Value = student.Id;
+        c33.Style.Font.FontName = "Arial";
+        c33.Style.Font.FontSize = 9;
+        c33.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        c33.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        c33.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+
+        // Footer: Fecha (D33)
+        var d33 = ws.Cell("D33");
+        d33.Value = dateLocal.ToString("dd/MM/yyyy");
+        d33.Style.Font.FontName = "Arial";
+        d33.Style.Font.FontSize = 9;
+        d33.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        d33.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        d33.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+
+        // Footer: Profesor (B35:C35)
+        var profRange = ws.Range("B35:C35");
+        profRange.Merge();
+        var b35 = ws.Cell("B35");
+        b35.Value = string.IsNullOrWhiteSpace(state.TeacherName)
+            ? "Ricardo Cesar Reinoso Rodriguez"
+            : state.TeacherName.Trim();
+        b35.Style.Font.FontName = "Arial";
+        b35.Style.Font.FontSize = 9;
+        b35.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        b35.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        profRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+
+        // Footer: Nombre del proyecto o caso (A38:G38)
+        var temaRange = ws.Range("A38:G38");
+        temaRange.Merge();
+        var a38 = ws.Cell("A38");
+        a38.Value = student.TemaTesis;
+        a38.Style.Font.FontName = "Arial";
+        a38.Style.Font.FontSize = 9;
+        a38.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        a38.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        a38.Style.Alignment.WrapText = true;
+        temaRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+
+        if (student.TemaTesis.Length > 190)
+            ws.Row(38).Height = 44;
+        else if (student.TemaTesis.Length > 95)
+            ws.Row(38).Height = 30;
+
+        wb.RecalculateAllFormulas();
+
+        using var outMs = new MemoryStream();
+        wb.SaveAs(outMs);
+        return outMs.ToArray();
+    }
+
+    private static string SanitizeFilePart(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "SinDato";
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(input.Trim()
+            .Replace(' ', '_')
+            .Where(c => !invalid.Contains(c) && c != '/' && c != '\\')
+            .ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? "SinDato" : cleaned;
     }
 }

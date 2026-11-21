@@ -11,6 +11,7 @@ public class AppDbContext : DbContext
     public DbSet<Evaluation> Evaluations => Set<Evaluation>();
     public DbSet<EvaluationDetail> EvaluationDetails => Set<EvaluationDetail>();
     public DbSet<EvaluationState> EvaluationStates => Set<EvaluationState>();
+    public DbSet<CriterionConfig> CriterionConfigs => Set<CriterionConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

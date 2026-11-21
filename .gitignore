@@ -6,3 +6,5 @@ publish/
 *.user
 *.suo
 *.zip
+~$*
+/RUBRICA_TRABAJO_FINAL.xlsx

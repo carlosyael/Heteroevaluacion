@@ -1,22 +1,28 @@
 @page "/"
 
-<PageTitle>Heteroevaluación de Tesis</PageTitle>
+<PageTitle>Heteroevaluación de Tesis - UNAPEC</PageTitle>
 
-<div class="container py-5">
-    <div class="text-center mb-5">
-        <h1 class="display-5 fw-bold">Sistema de Heteroevaluación de Tesis</h1>
-        <p class="lead text-muted">
-            Plataforma de evaluación entre pares orquestada por el docente.
+<div class="container py-4 py-md-5">
+    <div class="unapec-hero text-center mb-4">
+        <img src="images/logo-unapec.png" alt="UNAPEC" class="unapec-hero-logo mb-3" />
+        <div>
+            <span class="unapec-badge mb-2">Decanato de Posgrado y Educación Continuada</span>
+        </div>
+        <h1 class="display-6 fw-bold mt-2 mb-2" style="color: #1F3864;">
+            Sistema de Heteroevaluación de Tesis
+        </h1>
+        <p class="lead text-muted mb-0 mx-auto" style="max-width: 640px;">
+            Plataforma institucional para la evaluación de trabajos finales entre pares, orquestada en vivo por el docente.
         </p>
     </div>
 
     <div class="row g-4 justify-content-center">
         <div class="col-md-5">
-            <div class="card h-100 shadow-sm border-0">
+            <div class="card h-100 portal-card-student">
                 <div class="card-body p-4 d-flex flex-column">
-                    <h3 class="card-title fw-bold mb-3">Portal de Estudiantes</h3>
+                    <h3 class="card-title fw-bold mb-2" style="color: #1F3864;">Portal de Estudiantes</h3>
                     <p class="card-text text-muted flex-grow-1">
-                        Accede con tu ID de estudiante registrado para evaluar las tesis de tus compañeros.
+                        Accede con tu matrícula registrada para evaluar la exposición activa.
                         Solo puedes calificar una vez a cada compañero y no puedes evaluarte a ti mismo.
                     </p>
                     <a href="/estudiante" class="btn btn-primary btn-lg mt-3">
@@ -27,14 +33,14 @@
         </div>
 
         <div class="col-md-5">
-            <div class="card h-100 shadow-sm border-0">
+            <div class="card h-100 portal-card-teacher">
                 <div class="card-body p-4 d-flex flex-column">
-                    <h3 class="card-title fw-bold mb-3">Backoffice del Maestro</h3>
+                    <h3 class="card-title fw-bold mb-2" style="color: #1F3864;">Backoffice del Maestro</h3>
                     <p class="card-text text-muted flex-grow-1">
-                        Carga el listado inicial de estudiantes mediante CSV o Excel (ID, Nombre, Carrera, Tema de Tesis),
-                        gestiona registros y consulta los resultados y promedios en tiempo real.
+                        Carga el listado de estudiantes vía CSV o Excel, controla la ronda en vivo,
+                        consulta promedios y descarga las rúbricas oficiales de UNAPEC completadas.
                     </p>
-                    <a href="/maestro" class="btn btn-dark btn-lg mt-3">
+                    <a href="/maestro" class="btn btn-unapec-accent btn-lg mt-3">
                         Ingresar al Backoffice
                     </a>
                 </div>

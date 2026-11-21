@@ -4,3 +4,5 @@ obj/
 .vscode/
 *.user
 *.suo
+~$*
+/RUBRICA_TRABAJO_FINAL.xlsx

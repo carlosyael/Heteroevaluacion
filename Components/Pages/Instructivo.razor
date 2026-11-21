@@ -1,0 +1,84 @@
+@page "/instructivo"
+
+<PageTitle>Instructivo de Uso - Heteroevaluación UNAPEC</PageTitle>
+
+<div class="container py-4">
+    <div class="mb-4">
+        <h2 class="fw-bold mb-1" style="color: #1F3864;">Instructivo de Uso</h2>
+        <p class="text-muted mb-0">Guía rápida para docentes y estudiantes sobre el Sistema de Heteroevaluación de Tesis.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card h-100 portal-card-teacher">
+                <div class="card-body p-4">
+                    <h4 class="fw-bold mb-3" style="color: #1F3864;">1. Para el Maestro (Backoffice)</h4>
+                    <ol class="ps-3 mb-0 d-flex flex-column gap-2">
+                        <li>
+                            <strong>Acceso:</strong> Ingresa a <a href="/maestro">/maestro</a> utilizando tu PIN de docente.
+                        </li>
+                        <li>
+                            <strong>Cargar estudiantes:</strong> En la pestaña <em>Estudiantes y Carga Masiva</em>, sube un archivo
+                            <code>.csv</code> o <code>.xlsx</code> con las columnas <code>Id</code>, <code>Nombre</code>,
+                            <code>Carrera</code> y <code>TemaTesis</code> (puedes descargar la plantilla Excel). También puedes agregarlos manualmente.
+                        </li>
+                        <li>
+                            <strong>Orquestar la evaluación en vivo:</strong> En el panel superior <em>Orquestación de Evaluación</em>,
+                            selecciona al estudiante que va a exponer y presiona <strong>Iniciar Evaluación</strong>.
+                            Verás en tiempo real cuántas evaluaciones han llegado y quiénes faltan por evaluar.
+                            Al finalizar, presiona <strong>Cerrar Evaluación</strong>.
+                        </li>
+                        <li>
+                            <strong>Consultar y exportar resultados:</strong> En <em>Resultados y Promedios</em> verás el promedio
+                            de cada estudiante, el botón <strong>Ver Detalle</strong>, controles con confirmación para limpiar o eliminar calificaciones,
+                            <strong>Exportar Resultados (.xlsx)</strong> y los botones <strong>Rúbrica (.xlsx)</strong> / <strong>Rúbricas (.zip)</strong>
+                            con el formato oficial de UNAPEC autocompletado.
+                        </li>
+                        <li>
+                            <strong>Configuración y reseteo:</strong> En <em>Configuración y Reseteo</em> puedes editar el
+                            <strong>Nombre del Profesor</strong>, la <strong>Carrera / Programa</strong> del encabezado, el
+                            <strong>Mínimo aprobatorio</strong>, tu <strong>PIN</strong>, los <strong>Criterios y Pesos (%)</strong> (deben sumar 100%)
+                            o <strong>Resetear el sistema desde 0</strong>.
+                        </li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card h-100 portal-card-student">
+                <div class="card-body p-4">
+                    <h4 class="fw-bold mb-3" style="color: #1F3864;">2. Para el Estudiante (Portal)</h4>
+                    <ol class="ps-3 mb-3 d-flex flex-column gap-2">
+                        <li>
+                            <strong>Acceso:</strong> Ingresa a <a href="/estudiante">/estudiante</a> usando tu
+                            <strong>ID (matrícula)</strong> registrado por el maestro.
+                        </li>
+                        <li>
+                            <strong>Esperar activación:</strong> Si el maestro aún no inicia una ronda, verás un aviso de espera.
+                            Usa <strong>Actualizar estado</strong> cuando el maestro indique que ya inició.
+                        </li>
+                        <li>
+                            <strong>Evaluar tesis:</strong> Haz clic en <strong>Evaluar Tesis</strong> sobre el compañero activo.
+                            Selecciona explícitamente el nivel de desempeño para cada criterio (<code>4 Excelente</code> a <code>0 No aceptable</code>)
+                            y agrega observaciones si lo deseas.
+                        </li>
+                        <li>
+                            <strong>Confirmar y enviar:</strong> Una vez completados todos los criterios, verifica tu puntaje en el panel
+                            <em>Resultado</em>, presiona <strong>Enviar Evaluación</strong> y confirma el envío definitivo.
+                        </li>
+                    </ol>
+
+                    <div class="alert alert-light border small mb-0">
+                        <strong>Reglas importantes:</strong>
+                        <ul class="mb-0 mt-1 ps-3">
+                            <li>No puedes evaluarte a ti mismo.</li>
+                            <li>Solo puedes calificar <strong>una vez</strong> a cada compañero.</li>
+                            <li>Todos los criterios son obligatorios antes de enviar.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
