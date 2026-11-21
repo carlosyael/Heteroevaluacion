@@ -1,13 +1,13 @@
 :root {
-    --unapec-navy: #1F3864;
-    --unapec-navy-dark: #142647;
-    --unapec-blue: #2B5797;
-    --unapec-orange: #D97B29;
-    --unapec-orange-hover: #B8651E;
-    --unapec-gold: #F2C94C;
-    --unapec-cream: #FDF3E3;
-    --unapec-bg: #F4F6FA;
-    --unapec-border: #DCE3EE;
+    --brand-navy: #1F3864;
+    --brand-navy-dark: #142647;
+    --brand-blue: #2B5797;
+    --brand-orange: #D97B29;
+    --brand-orange-hover: #B8651E;
+    --brand-gold: #F2C94C;
+    --brand-cream: #FDF3E3;
+    --brand-bg: #F4F6FA;
+    --brand-border: #DCE3EE;
     --pill-approved-bg: #DCFCE7;
     --pill-approved-text: #166534;
     --pill-failed-bg: #FEE2E2;
@@ -15,62 +15,62 @@
 }
 
 body {
-    background-color: var(--unapec-bg);
+    background-color: var(--brand-bg);
     color: #1E293B;
     font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
 }
 
 .card {
     border-radius: 14px !important;
-    border: 1px solid var(--unapec-border) !important;
+    border: 1px solid var(--brand-border) !important;
     box-shadow: 0 4px 18px rgba(31, 56, 100, 0.06) !important;
 }
 
-.bg-unapec {
-    background-color: var(--unapec-navy) !important;
+.bg-brand {
+    background-color: var(--brand-navy) !important;
     color: #ffffff !important;
 }
 
 .btn-primary {
-    background-color: var(--unapec-navy);
-    border-color: var(--unapec-navy);
+    background-color: var(--brand-navy);
+    border-color: var(--brand-navy);
 }
 
 .btn-primary:hover, .btn-primary:focus {
-    background-color: var(--unapec-navy-dark);
-    border-color: var(--unapec-navy-dark);
+    background-color: var(--brand-navy-dark);
+    border-color: var(--brand-navy-dark);
 }
 
 .btn-outline-primary {
-    color: var(--unapec-navy);
-    border-color: var(--unapec-navy);
+    color: var(--brand-navy);
+    border-color: var(--brand-navy);
 }
 
 .btn-outline-primary:hover, .btn-outline-primary:focus {
-    background-color: var(--unapec-navy);
-    border-color: var(--unapec-navy);
+    background-color: var(--brand-navy);
+    border-color: var(--brand-navy);
     color: #ffffff;
 }
 
 .btn-dark {
-    background-color: var(--unapec-navy-dark);
-    border-color: var(--unapec-navy-dark);
+    background-color: var(--brand-navy-dark);
+    border-color: var(--brand-navy-dark);
 }
 
-.btn-unapec-accent {
-    background-color: var(--unapec-orange);
-    border-color: var(--unapec-orange);
+.btn-accent {
+    background-color: var(--brand-orange);
+    border-color: var(--brand-orange);
     color: #ffffff;
     font-weight: 700;
 }
 
-.btn-unapec-accent:hover, .btn-unapec-accent:focus {
-    background-color: var(--unapec-orange-hover);
-    border-color: var(--unapec-orange-hover);
+.btn-accent:hover, .btn-accent:focus {
+    background-color: var(--brand-orange-hover);
+    border-color: var(--brand-orange-hover);
     color: #ffffff;
 }
 
-.btn-unapec-accent:disabled {
+.btn-accent:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
@@ -83,30 +83,24 @@ body {
 }
 
 .nav-tabs .nav-link.active {
-    color: var(--unapec-navy);
+    color: var(--brand-navy);
     background: transparent;
-    border-bottom: 3px solid var(--unapec-orange);
+    border-bottom: 3px solid var(--brand-orange);
 }
 
 /* Home Hero & Portal Cards */
-.unapec-hero {
+.brand-hero {
     background: #ffffff;
-    border: 1px solid var(--unapec-border);
-    border-top: 4px solid var(--unapec-navy);
+    border: 1px solid var(--brand-border);
+    border-top: 4px solid var(--brand-navy);
     border-radius: 16px;
     padding: 2rem 1.5rem;
     box-shadow: 0 6px 24px rgba(31, 56, 100, 0.06);
 }
 
-.unapec-hero-logo {
-    height: 54px;
-    width: auto;
-    object-fit: contain;
-}
-
-.unapec-badge {
+.brand-badge {
     display: inline-block;
-    background-color: var(--unapec-cream);
+    background-color: var(--brand-cream);
     color: #9A4D0D;
     border: 1px solid #F5D0A9;
     font-weight: 700;
@@ -118,22 +112,22 @@ body {
 }
 
 .portal-card-student {
-    border-top: 4px solid var(--unapec-navy) !important;
+    border-top: 4px solid var(--brand-navy) !important;
 }
 
 .portal-card-teacher {
-    border-top: 4px solid var(--unapec-orange) !important;
+    border-top: 4px solid var(--brand-orange) !important;
 }
 
-/* Evaluation Form (Cohesive UNAPEC Light Surface + Navy Result Summary) */
+/* Evaluation Form (Cohesive Light Surface + Navy Result Summary) */
 .hetero-shell {
     background: transparent;
     color: #1E293B;
 }
 
 .eval-banner {
-    background: linear-gradient(135deg, var(--unapec-navy) 0%, var(--unapec-navy-dark) 100%);
-    border-bottom: 4px solid var(--unapec-orange);
+    background: linear-gradient(135deg, var(--brand-navy) 0%, var(--brand-navy-dark) 100%);
+    border-bottom: 4px solid var(--brand-orange);
     border-radius: 14px;
     padding: 1.25rem 1.5rem;
     color: #ffffff;
@@ -153,8 +147,8 @@ body {
 
 .hetero-card {
     background-color: #ffffff;
-    border: 1px solid var(--unapec-border);
-    border-left: 4px solid var(--unapec-navy);
+    border: 1px solid var(--brand-border);
+    border-left: 4px solid var(--brand-navy);
     border-radius: 14px;
     padding: 1.35rem;
     color: #1E293B;
@@ -177,7 +171,7 @@ body {
 .criterion-title {
     font-size: 1.04rem;
     font-weight: 700;
-    color: var(--unapec-navy);
+    color: var(--brand-navy);
 }
 
 .criterion-chapter {
@@ -188,7 +182,7 @@ body {
 }
 
 .criterion-weight {
-    background-color: var(--unapec-cream);
+    background-color: var(--brand-cream);
     color: #B45309;
     border: 1px solid #F5D0A9;
     font-weight: 700;
@@ -228,13 +222,13 @@ body {
 
 .score-btn:hover {
     background-color: #EEF3FA;
-    border-color: var(--unapec-blue);
+    border-color: var(--brand-blue);
     transform: translateY(-1px);
 }
 
 .score-btn.active {
-    background-color: var(--unapec-navy);
-    border-color: var(--unapec-navy);
+    background-color: var(--brand-navy);
+    border-color: var(--brand-navy);
     color: #ffffff;
     font-weight: 700;
     box-shadow: 0 4px 12px rgba(31, 56, 100, 0.28);
@@ -252,9 +246,9 @@ body {
 }
 
 .rubric-desc-box {
-    background-color: var(--unapec-cream);
+    background-color: var(--brand-cream);
     border: 1px solid #F5D0A9;
-    border-left: 4px solid var(--unapec-orange);
+    border-left: 4px solid var(--brand-orange);
     border-radius: 10px;
     padding: 0.85rem 1rem;
     font-size: 0.9rem;
@@ -290,7 +284,7 @@ body {
 
 .evidence-input:focus {
     outline: none;
-    border-color: var(--unapec-navy);
+    border-color: var(--brand-navy);
     box-shadow: 0 0 0 3px rgba(31, 56, 100, 0.12);
 }
 
@@ -301,19 +295,29 @@ body {
 }
 
 .weighted-points-text strong {
-    color: var(--unapec-navy);
+    color: var(--brand-navy);
 }
 
 .resultado-sticky {
     position: sticky;
-    top: 4.75rem;
+    top: 4.35rem;
+    max-height: calc(100vh - 5rem);
+    overflow-y: auto;
+}
+
+@media (max-width: 991.98px) {
+    .resultado-sticky {
+        position: static;
+        max-height: none;
+        overflow-y: visible;
+    }
 }
 
 .resultado-card {
-    background: linear-gradient(180deg, var(--unapec-navy) 0%, var(--unapec-navy-dark) 100%);
-    border-top: 4px solid var(--unapec-orange);
+    background: linear-gradient(180deg, var(--brand-navy) 0%, var(--brand-navy-dark) 100%);
+    border-top: 4px solid var(--brand-orange);
     border-radius: 16px;
-    padding: 1.5rem;
+    padding: 1.15rem 1.25rem;
     color: #ffffff;
     box-shadow: 0 12px 30px rgba(31, 56, 100, 0.22);
 }
@@ -321,27 +325,27 @@ body {
 .gauge-row {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
-    margin: 1rem 0 1.25rem 0;
+    gap: 1rem;
+    margin: 0.6rem 0 0.85rem 0;
 }
 
 .score-big {
-    font-size: 2.5rem;
+    font-size: 2.15rem;
     font-weight: 800;
     line-height: 1;
 }
 
 .score-max {
-    font-size: 1.05rem;
+    font-size: 1rem;
     color: #CBD5E1;
-    margin-bottom: 0.3rem;
+    margin-bottom: 0.2rem;
 }
 
 .classification-text {
-    font-size: 1.15rem;
+    font-size: 1.05rem;
     font-weight: 700;
-    color: var(--unapec-gold);
-    margin-bottom: 0.4rem;
+    color: var(--brand-gold);
+    margin-bottom: 0.25rem;
 }
 
 .status-pill {
@@ -372,8 +376,8 @@ body {
     grid-template-columns: 105px 1fr 48px;
     align-items: center;
     gap: 0.65rem;
-    margin-bottom: 0.55rem;
-    font-size: 0.86rem;
+    margin-bottom: 0.38rem;
+    font-size: 0.83rem;
 }
 
 .breakdown-bar-bg {
@@ -385,24 +389,24 @@ body {
 
 .breakdown-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--unapec-orange) 0%, var(--unapec-gold) 100%);
+    background: linear-gradient(90deg, var(--brand-orange) 0%, var(--brand-gold) 100%);
     border-radius: 999px;
     transition: width 0.25s ease;
 }
 
 .legend-footer {
-    margin-top: 1.1rem;
-    padding-top: 0.85rem;
+    margin-top: 0.7rem;
+    padding-top: 0.6rem;
     border-top: 1px solid rgba(255, 255, 255, 0.14);
-    font-size: 0.76rem;
+    font-size: 0.78rem;
     color: #CBD5E1;
-    line-height: 1.5;
+    line-height: 1.4;
 }
 
 .confirm-submit-box {
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(242, 201, 76, 0.45);
     border-radius: 12px;
-    padding: 0.9rem;
-    margin-top: 1rem;
+    padding: 0.7rem 0.8rem;
+    margin-top: 0.75rem;
 }

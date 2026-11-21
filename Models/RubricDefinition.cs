@@ -114,7 +114,7 @@ public static class RubricDefinition
         ),
         new(
             9, "formato", "Formato",
-            "9. Cumplimiento de normas de formato (Guía UNAPEC)", "(Estructura)", 5.0,
+            "9. Cumplimiento de normas de formato", "(Estructura)", 5.0,
             new()
             {
                 new(4, "Excelente", "El documento cumple totalmente los requisitos formales de la guía: encuadernado, papel, tipo y tamaño de letra, márgenes, espaciado, sangrías, numeración de páginas y presentación de tablas y figuras."),

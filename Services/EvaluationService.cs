@@ -496,6 +496,9 @@ public class EvaluationService
         ws.Columns().AdjustToContents();
 
         // Sheet 2: Individual evaluations per student
+        var (state, _) = await GetEvaluationStateAsync();
+        var configs = await GetCriterionConfigsAsync();
+
         await using var db = await _dbFactory.CreateDbContextAsync();
         var allEvals = await db.Evaluations.AsNoTracking()
             .Include(e => e.Evaluated)
@@ -513,10 +516,10 @@ public class EvaluationService
         wsDetail.Cell(1, 5).Value = "Puntaje Total";
         wsDetail.Cell(1, 6).Value = "Clasificación";
         wsDetail.Cell(1, 7).Value = "Estado";
-        wsDetail.Cell(1, 8).Value = "Fecha (UTC)";
+        wsDetail.Cell(1, 8).Value = "Fecha (Hora RD)";
 
         int col = 9;
-        foreach (var c in RubricDefinition.Criteria)
+        foreach (var c in configs)
         {
             wsDetail.Cell(1, col++).Value = $"{c.ShortName} ({c.Weight}%)";
             wsDetail.Cell(1, col++).Value = $"Obs. {c.ShortName}";
@@ -531,11 +534,11 @@ public class EvaluationService
             wsDetail.Cell(dRow, 4).Value = ev.Evaluator?.Nombre ?? "";
             wsDetail.Cell(dRow, 5).Value = ev.TotalScore;
             wsDetail.Cell(dRow, 6).Value = ev.Classification;
-            wsDetail.Cell(dRow, 7).Value = ev.Approved ? "Aprobado" : "Reprobado";
-            wsDetail.Cell(dRow, 8).Value = ev.CreatedAt.ToString("yyyy-MM-dd HH:mm");
+            wsDetail.Cell(dRow, 7).Value = ev.TotalScore >= state.MinPassingScore ? "Aprobado" : "Reprobado";
+            wsDetail.Cell(dRow, 8).Value = ev.CreatedAt.AddHours(-4).ToString("yyyy-MM-dd HH:mm");
 
             int cCol = 9;
-            foreach (var c in RubricDefinition.Criteria)
+            foreach (var c in configs)
             {
                 var det = ev.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
                 wsDetail.Cell(dRow, cCol++).Value = det?.WeightedPoints ?? 0;

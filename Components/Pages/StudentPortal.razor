@@ -1,11 +1,12 @@
 @page "/estudiante"
 @rendermode InteractiveServer
+@implements IDisposable
 @using HeteroevaluacionApp.Models
 @using HeteroevaluacionApp.Services
 @inject EvaluationService EvalService
 @inject SessionService Session
 
-<PageTitle>Portal de Estudiantes - Heteroevaluación UNAPEC</PageTitle>
+<PageTitle>Portal de Estudiantes - Heteroevaluación</PageTitle>
 
 @if (Session.CurrentStudent == null)
 {
@@ -67,11 +68,14 @@ else if (_selectedTarget == null)
             </div>
         }
 
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
             <h4 class="fw-bold mb-0" style="color: #1F3864;">Evaluación Activa</h4>
-            <button class="btn btn-outline-primary btn-sm" @onclick="LoadClassmatesAsync">
-                Actualizar estado
-            </button>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-light text-dark border">Actualización automática</span>
+                <button class="btn btn-outline-primary btn-sm" @onclick="LoadClassmatesAsync">
+                    Actualizar estado
+                </button>
+            </div>
         </div>
 
         @if (!_evalState.IsOpen || _activeTarget == null)
@@ -119,7 +123,7 @@ else if (_selectedTarget == null)
                                 }
                                 else
                                 {
-                                    <button class="btn btn-unapec-accent w-100 mt-2" @onclick="() => StartEvaluation(activeStatus.Student)">
+                                    <button class="btn btn-accent w-100 mt-2" @onclick="() => StartEvaluation(activeStatus.Student)">
                                         Evaluar Tesis
                                     </button>
                                 }
@@ -236,21 +240,21 @@ else
                             double total = CalculateTotal();
                             string classification = allAnswered ? RubricDefinition.Classify(total) : "En progreso";
                             bool approved = total >= _evalState.MinPassingScore;
-                            double radius = 44;
+                            double radius = 36;
                             double circumference = 2 * Math.PI * radius;
                             double dashOffset = circumference * (1.0 - Math.Clamp(total, 0, 100) / 100.0);
                         }
 
                         <div class="gauge-row">
-                            <svg width="110" height="110" viewBox="0 0 110 110">
-                                <circle cx="55" cy="55" r="@radius"
-                                        fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="11" />
-                                <circle cx="55" cy="55" r="@radius"
-                                        fill="none" stroke="#F2C94C" stroke-width="11"
+                            <svg width="92" height="92" viewBox="0 0 92 92">
+                                <circle cx="46" cy="46" r="@radius"
+                                        fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="9" />
+                                <circle cx="46" cy="46" r="@radius"
+                                        fill="none" stroke="#F2C94C" stroke-width="9"
                                         stroke-linecap="round"
                                         stroke-dasharray="@circumference.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"
                                         stroke-dashoffset="@dashOffset.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"
-                                        transform="rotate(-90 55 55)" />
+                                        transform="rotate(-90 46 46)" />
                             </svg>
                             <div>
                                 <div class="score-big">@total.ToString("0.0")</div>
@@ -288,13 +292,12 @@ else
                         </div>
 
                         <div class="legend-footer">
-                            Mínimo aprobatorio: @_evalState.MinPassingScore &middot; Excelente &ge; 90 &middot; Bueno &ge; 80 &middot;
-                            Satisfactorio &ge; 70 &middot; Deficiente &ge; 50
+                            Mínimo aprobatorio: @_evalState.MinPassingScore
                         </div>
 
                         @if (!_confirmSubmit)
                         {
-                            <button class="btn btn-unapec-accent w-100 mt-3 py-2"
+                            <button class="btn btn-accent w-100 mt-3 py-2"
                                     @onclick="RequestSubmitConfirmation"
                                     disabled="@(!allAnswered || _isSubmitting)">
                                 @(allAnswered ? "Enviar Evaluación" : $"Completa los {_activeCriteria.Count} criterios ({answeredCount}/{_activeCriteria.Count})")
@@ -304,11 +307,10 @@ else
                         {
                             <div class="confirm-submit-box">
                                 <div class="small mb-2">
-                                    ¿Enviar evaluación definitiva con <strong>@total.ToString("0.0") / 100</strong> (@classification)?
-                                    No podrás modificarla después.
+                                    ¿Confirmar envío definitivo (<strong>@total.ToString("0.0") / 100</strong>)?
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button class="btn btn-unapec-accent btn-sm flex-grow-1"
+                                    <button class="btn btn-accent btn-sm flex-grow-1"
                                             @onclick="SubmitEvaluationAsync"
                                             disabled="@_isSubmitting">
                                         @(_isSubmitting ? "Guardando..." : "Confirmar envío")
@@ -336,6 +338,9 @@ else
     private bool _isLoading;
     private bool _isSubmitting;
     private bool _confirmSubmit;
+    private System.Threading.Timer? _pollTimer;
+    private bool _disposed;
+    private bool _isPolling;
 
     private List<ClassmateStatus> _classmates = new();
     private List<CriterionConfig> _activeCriteria = new();
@@ -350,6 +355,7 @@ else
         if (Session.CurrentStudent != null)
         {
             await LoadClassmatesAsync();
+            SyncPollTimer();
         }
     }
 
@@ -372,6 +378,7 @@ else
             }
             Session.CurrentStudent = student;
             await LoadClassmatesAsync();
+            SyncPollTimer();
         }
         finally
         {
@@ -381,6 +388,7 @@ else
 
     private void Logout()
     {
+        StopPollTimer();
         Session.CurrentStudent = null;
         _selectedTarget = null;
         _confirmSubmit = false;
@@ -398,8 +406,54 @@ else
         _activeTarget = active;
     }
 
+    private void SyncPollTimer()
+    {
+        if (Session.CurrentStudent != null && _selectedTarget == null && !_disposed)
+        {
+            _pollTimer ??= new System.Threading.Timer(_ =>
+            {
+                if (_disposed || _isPolling) return;
+                _ = InvokeAsync(async () =>
+                {
+                    if (_disposed || _isPolling || Session.CurrentStudent == null || _selectedTarget != null) return;
+                    _isPolling = true;
+                    try
+                    {
+                        await LoadClassmatesAsync();
+                        StateHasChanged();
+                    }
+                    catch
+                    {
+                        // Ignore transient circuit/timer teardown races
+                    }
+                    finally
+                    {
+                        _isPolling = false;
+                    }
+                });
+            }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+        }
+        else
+        {
+            StopPollTimer();
+        }
+    }
+
+    private void StopPollTimer()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = null;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        StopPollTimer();
+    }
+
     private void StartEvaluation(Student target)
     {
+        StopPollTimer();
         _selectedTarget = target;
         _evalError = null;
         _confirmSubmit = false;
@@ -412,6 +466,7 @@ else
         _selectedTarget = null;
         _evalError = null;
         _confirmSubmit = false;
+        SyncPollTimer();
     }
 
     private void SelectScore(string key, int score)
@@ -482,6 +537,7 @@ else
             _selectedTarget = null;
             _confirmSubmit = false;
             await LoadClassmatesAsync();
+            SyncPollTimer();
         }
         finally
         {

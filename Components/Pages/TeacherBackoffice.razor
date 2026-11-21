@@ -36,7 +36,7 @@
                                    @onkeydown="HandlePinKeyDown" />
                         </div>
 
-                        <button class="btn btn-unapec-accent w-100 btn-lg" @onclick="VerifyPin">
+                        <button class="btn btn-accent w-100 btn-lg" @onclick="VerifyPin">
                             Ingresar
                         </button>
                     </div>
@@ -262,9 +262,23 @@ else
                                                 <td>@s.Carrera</td>
                                                 <td>@s.TemaTesis</td>
                                                 <td class="text-end">
-                                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => DeleteStudentAsync(s.Id)">
-                                                        Eliminar
-                                                    </button>
+                                                    @if (_confirmDeleteStudentId == s.Id)
+                                                    {
+                                                        <div class="d-flex justify-content-end gap-1">
+                                                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteStudentAsync(s.Id)">
+                                                                Confirmar
+                                                            </button>
+                                                            <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteStudentId = null">
+                                                                Cancelar
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteStudentId = s.Id">
+                                                            Eliminar
+                                                        </button>
+                                                    }
                                                 </td>
                                             </tr>
                                         }
@@ -280,7 +294,8 @@ else
         {
             <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
                 <h5 class="fw-bold mb-0">Resumen de Calificaciones</h5>
-                <div class="d-flex flex-wrap gap-2">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="badge bg-light text-dark border">Auto-refresco 5s</span>
                     <button class="btn btn-outline-primary btn-sm" @onclick="RefreshResultsAsync">
                         Refrescar
                     </button>
@@ -402,21 +417,23 @@ else
             @if (_detailStudent != null)
             {
                 <div class="card shadow-sm">
-                    <div class="card-header bg-unapec d-flex justify-content-between align-items-center">
+                    <div class="card-header bg-brand d-flex justify-content-between align-items-center">
                         <strong>Detalle de Evaluaciones: @_detailStudent.Nombre (@_detailStudent.Id)</strong>
                         <button class="btn btn-sm btn-light" @onclick="() => _detailStudent = null">Cerrar</button>
                     </div>
                     <div class="card-body">
                         @foreach (var eval in _detailEvaluations)
                         {
+                            bool evalApproved = eval.TotalScore >= _evalState.MinPassingScore;
                             <div class="border rounded p-3 mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
                                     <div>
                                         <strong>Evaluador:</strong> @eval.Evaluator?.Nombre (@eval.EvaluatorId)
+                                        <span class="text-muted small ms-2">@eval.CreatedAt.AddHours(-4).ToString("dd/MM/yyyy HH:mm")</span>
                                     </div>
                                     <div>
                                         <span class="badge bg-dark me-1">@eval.TotalScore.ToString("0.00") / 100</span>
-                                        <span class="badge @(eval.Approved ? "bg-success" : "bg-danger") me-2">
+                                        <span class="badge @(evalApproved ? "bg-success" : "bg-danger") me-2">
                                             @eval.Classification
                                         </span>
                                         <button class="btn btn-outline-success btn-sm me-1" @onclick="() => ExportSingleEvaluationRubricAsync(eval.Id)">
@@ -440,7 +457,7 @@ else
                                     </div>
                                 </div>
                                 <div class="row g-2 small">
-                                    @foreach (var c in RubricDefinition.Criteria)
+                                    @foreach (var c in _criterionConfigs)
                                     {
                                         var d = eval.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
                                         if (d != null)
@@ -646,6 +663,7 @@ else
     private bool _confirmReset;
     private bool _confirmDeleteAllEvals;
     private string? _confirmClearStudentId;
+    private string? _confirmDeleteStudentId;
     private int? _confirmDeleteEvalId;
 
     private List<Student> _pendingEvaluators = new();
@@ -748,14 +766,14 @@ else
 
     private void SyncLiveTimer()
     {
-        if (Session.IsTeacherAuthenticated && _evalState.IsOpen && !_disposed)
+        if (Session.IsTeacherAuthenticated && !_disposed)
         {
             _liveTimer ??= new System.Threading.Timer(_ =>
             {
                 if (_disposed || _isRefreshingLive) return;
                 _ = InvokeAsync(async () =>
                 {
-                    if (_disposed || _isRefreshingLive) return;
+                    if (_disposed || _isRefreshingLive || !Session.IsTeacherAuthenticated) return;
                     _isRefreshingLive = true;
                     try
                     {
@@ -768,7 +786,6 @@ else
                         {
                             _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
                         }
-                        if (!_evalState.IsOpen) StopLiveTimer();
                         StateHasChanged();
                     }
                     catch
@@ -885,6 +902,7 @@ else
 
     private async Task DeleteStudentAsync(string id)
     {
+        _confirmDeleteStudentId = null;
         await EvalService.DeleteStudentAsync(id);
         await LoadDataAsync();
     }
