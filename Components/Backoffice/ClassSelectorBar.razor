@@ -1,0 +1,232 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@using QRCoder
+@inject EvaluationService EvalSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="card mb-3 portal-card-student">
+    <div class="card-body py-3">
+        <div class="row g-3 align-items-center">
+            <div class="col-lg-6">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                    <label class="form-label small fw-bold text-uppercase text-muted mb-0" style="letter-spacing: 0.04em;">
+                        Clase Seleccionada
+                    </label>
+                    @if (ActiveClass != null)
+                    {
+                        @if (ActiveClass.IsArchived)
+                        {
+                            <span class="badge bg-secondary">Archivada</span>
+                        }
+                        @if (ActiveClass.IsEvaluationOpen)
+                        {
+                            <span class="badge bg-success">Ronda en Vivo</span>
+                        }
+                        else if (!ActiveClass.IsArchived)
+                        {
+                            <span class="badge bg-light text-dark border">En espera</span>
+                        }
+                        <span class="badge bg-light text-dark border">@StudentCount est.</span>
+                        <span class="badge bg-light text-dark border">@GroupCount grp.</span>
+                    }
+                </div>
+                <select class="form-select" value="@SelectedClassId" @onchange="HandleClassChangedAsync" disabled="@ShowClassesHub">
+                    @{
+                        var activeList = Classes.Where(c => !c.IsArchived).ToList();
+                        var archivedList = Classes.Where(c => c.IsArchived).ToList();
+                    }
+                    @if (activeList.Count > 0)
+                    {
+                        <optgroup label="Clases Activas">
+                            @foreach (var cls in activeList)
+                            {
+                                <option value="@cls.Id">@cls.Name (@cls.Code)</option>
+                            }
+                        </optgroup>
+                    }
+                    @if (archivedList.Count > 0)
+                    {
+                        <optgroup label="Clases Archivadas">
+                            @foreach (var cls in archivedList)
+                            {
+                                <option value="@cls.Id">[Archivada] @cls.Name (@cls.Code)</option>
+                            }
+                        </optgroup>
+                    }
+                </select>
+            </div>
+
+            <div class="col-lg-6 d-flex flex-wrap gap-2 justify-content-lg-end">
+                <button class="btn @(ShowClassesHub ? "btn-primary" : "btn-outline-primary") btn-sm"
+                        @onclick="() => OnToggleClassesHub.InvokeAsync()">
+                    @(ShowClassesHub ? "Volver a la Clase" : $"Mis Clases ({Classes.Count})")
+                </button>
+                @if (ActiveClass != null)
+                {
+                    <button class="btn btn-accent btn-sm" @onclick="() => OpenQr(ActiveClass)">
+                        Proyectar Acceso / QR
+                    </button>
+                }
+                <button class="btn btn-outline-secondary btn-sm" @onclick="OpenPinModal">
+                    PIN Docente
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (CurrentQrClass != null)
+{
+    var joinUrl = BuildStudentUrl(CurrentQrClass.Code);
+    <div class="modal-backdrop-custom" @onclick="CloseQrModalAsync">
+        <div class="modal-dialog-custom text-center" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <span class="badge bg-primary">Acceso para Estudiantes</span>
+                <button type="button" class="btn-close" @onclick="CloseQrModalAsync"></button>
+            </div>
+
+            <h4 class="fw-bold mb-1" style="color: #1F3864;">@CurrentQrClass.Name</h4>
+            <div class="text-muted small mb-3">@CurrentQrClass.TeacherName</div>
+
+            @if (CurrentQrClass.IsArchived)
+            {
+                <div class="alert alert-warning small py-2 mb-3">
+                    Esta clase está archivada. Reactívala en <strong>Mis Clases</strong> o en <strong>Ficha y Rúbrica</strong> para permitir el acceso de estudiantes.
+                </div>
+            }
+
+            <div class="qr-box mb-3">
+                @RenderQrSvg(joinUrl)
+            </div>
+
+            <div class="mb-2">
+                <span class="text-muted small d-block">Código de la Clase</span>
+                <span class="badge bg-dark fs-4 px-3 py-2 font-monospace">@CurrentQrClass.Code</span>
+            </div>
+
+            <div class="p-2 bg-light rounded border small text-break font-monospace mb-3">
+                @joinUrl
+            </div>
+
+            <div class="d-flex gap-2 justify-content-center">
+                <button class="btn btn-primary" @onclick="() => CopyUrlAsync(joinUrl)">
+                    @(_copiedUrl ? "¡Enlace copiado!" : "Copiar enlace directo")
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="CloseQrModalAsync">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showPinModal)
+{
+    <div class="modal-backdrop-custom" @onclick="ClosePinModal">
+        <div class="modal-dialog-custom" @onclick:stopPropagation="true">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="fw-bold mb-0" style="color: #1F3864;">Seguridad Global del Docente</h5>
+                <button type="button" class="btn-close" @onclick="ClosePinModal"></button>
+            </div>
+
+            <p class="text-muted small mb-3">
+                El PIN se almacena cifrado (PBKDF2) y aplica para ingresar al Panel Docente de todas tus clases.
+            </p>
+
+            @if (!string.IsNullOrEmpty(_pinMsg))
+            {
+                <div class="alert @(_pinError ? "alert-danger" : "alert-success") py-2 small">@_pinMsg</div>
+            }
+
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Nuevo PIN de acceso</label>
+                <input type="password" class="form-control" @bind="_newPinInput" placeholder="Mínimo 4 caracteres" />
+            </div>
+
+            <div class="d-flex gap-2 justify-content-end">
+                <button class="btn btn-outline-secondary" @onclick="ClosePinModal">Cerrar</button>
+                <button class="btn btn-primary" @onclick="SavePinAsync">Actualizar PIN</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public List<ClassRoom> Classes { get; set; } = new();
+    [Parameter, EditorRequired] public int SelectedClassId { get; set; }
+    [Parameter] public ClassRoom? ActiveClass { get; set; }
+    [Parameter] public int StudentCount { get; set; }
+    [Parameter] public int GroupCount { get; set; }
+    [Parameter] public bool ShowClassesHub { get; set; }
+    [Parameter] public ClassRoom? QrRequestClass { get; set; }
+    [Parameter] public EventCallback<int> OnClassSelected { get; set; }
+    [Parameter] public EventCallback OnToggleClassesHub { get; set; }
+    [Parameter] public EventCallback OnQrClosed { get; set; }
+
+    private ClassRoom? _localQrClass;
+    private bool _copiedUrl;
+
+    private bool _showPinModal;
+    private string _newPinInput = string.Empty;
+    private string? _pinMsg;
+    private bool _pinError;
+
+    private ClassRoom? CurrentQrClass => _localQrClass ?? QrRequestClass;
+
+    private string BuildStudentUrl(string code) => $"{Nav.BaseUri.TrimEnd('/')}/estudiante/{code}";
+
+    private static MarkupString RenderQrSvg(string url)
+    {
+        using var qrGen = new QRCodeGenerator();
+        using var qrData = qrGen.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
+        using var svgQr = new SvgQRCode(qrData);
+        return new MarkupString(svgQr.GetGraphic(8));
+    }
+
+    private async Task HandleClassChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int newId))
+        {
+            await OnClassSelected.InvokeAsync(newId);
+        }
+    }
+
+    private void OpenQr(ClassRoom cls)
+    {
+        _copiedUrl = false;
+        _localQrClass = cls;
+    }
+
+    private async Task CloseQrModalAsync()
+    {
+        _localQrClass = null;
+        _copiedUrl = false;
+        await OnQrClosed.InvokeAsync();
+    }
+
+    private async Task CopyUrlAsync(string url)
+    {
+        await JS.InvokeVoidAsync("copyTextToClipboard", url);
+        _copiedUrl = true;
+        StateHasChanged();
+        await Task.Delay(2000);
+        _copiedUrl = false;
+    }
+
+    private void OpenPinModal()
+    {
+        _pinMsg = null;
+        _pinError = false;
+        _newPinInput = string.Empty;
+        _showPinModal = true;
+    }
+
+    private void ClosePinModal() => _showPinModal = false;
+
+    private async Task SavePinAsync()
+    {
+        var (ok, msg) = await EvalSvc.UpdateTeacherPinAsync(_newPinInput);
+        _pinError = !ok;
+        _pinMsg = msg;
+        if (ok) _newPinInput = string.Empty;
+    }
+}

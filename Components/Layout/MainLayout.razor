@@ -1,4 +1,6 @@
 ﻿@inherits LayoutComponentBase
+@using HeteroevaluacionApp.Services
+@inject SessionService Session
 
 <div class="page">
     <div class="sidebar">
@@ -12,7 +14,21 @@
                     Sistema de Heteroevaluación de Tesis
                 </span>
             </div>
-            <a href="/instructivo" class="top-row-guide">Instructivo</a>
+            <div class="d-flex align-items-center gap-2">
+                @if (Session.CurrentStudent != null)
+                {
+                    <span class="badge bg-primary-subtle text-primary border d-none d-md-inline-block">
+                        @Session.CurrentStudent.Nombre (@Session.CurrentStudent.Matricula)
+                    </span>
+                }
+                else if (Session.IsTeacherAuthenticated)
+                {
+                    <span class="badge bg-warning-subtle text-dark border d-none d-md-inline-block">
+                        Modo Docente
+                    </span>
+                }
+                <a href="/instructivo" class="top-row-guide">Instructivo</a>
+            </div>
         </div>
 
         <article class="content px-4">

@@ -31,6 +31,9 @@ services:
       TEACHER_PIN: "profesor2026"
     ports:
       - "8080:8080"
+    volumes:
+      - dataprotection_keys:/app/dataprotection-keys
 
 volumes:
   mysql_data:
+  dataprotection_keys:

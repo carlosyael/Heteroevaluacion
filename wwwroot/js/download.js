@@ -16,3 +16,18 @@ window.downloadFileFromBytes = (fileName, base64Data, contentType) => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 };
+
+window.copyTextToClipboard = async (text) => {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+window.heteroStorage = {
+    get: (key) => { try { return localStorage.getItem(key); } catch { return null; } },
+    set: (key, val) => { try { localStorage.setItem(key, val); } catch { } },
+    remove: (key) => { try { localStorage.removeItem(key); } catch { } }
+};

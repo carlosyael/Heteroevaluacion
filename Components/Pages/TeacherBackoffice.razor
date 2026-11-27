@@ -1,14 +1,16 @@
 @page "/maestro"
 @rendermode InteractiveServer
 @implements IDisposable
+@using HeteroevaluacionApp.Components.Backoffice
 @using HeteroevaluacionApp.Models
 @using HeteroevaluacionApp.Services
-@inject StudentImportService ImportService
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject ClassService ClassSvc
 @inject EvaluationService EvalService
 @inject SessionService Session
-@inject IJSRuntime JS
+@inject ProtectedSessionStorage SessionStorage
 
-<PageTitle>Backoffice Maestro - Heteroevaluación</PageTitle>
+<PageTitle>Panel Docente - Heteroevaluación</PageTitle>
 
 @if (!Session.IsTeacherAuthenticated)
 {
@@ -17,9 +19,9 @@
             <div class="col-md-5">
                 <div class="card portal-card-teacher">
                     <div class="card-body p-4">
-                        <h3 class="fw-bold mb-2" style="color: #1F3864;">Backoffice del Maestro</h3>
+                        <h3 class="fw-bold mb-2" style="color: #1F3864;">Panel Docente</h3>
                         <p class="text-muted small mb-4">
-                            Ingresa el PIN de docente para gestionar estudiantes y consultar resultados.
+                            Ingresa tu PIN de docente para administrar clases, equipos de trabajo, rondas en vivo y resultados.
                         </p>
 
                         @if (!string.IsNullOrEmpty(_pinError))
@@ -36,7 +38,7 @@
                                    @onkeydown="HandlePinKeyDown" />
                         </div>
 
-                        <button class="btn btn-accent w-100 btn-lg" @onclick="VerifyPin">
+                        <button class="btn btn-accent w-100 btn-lg" @onclick="VerifyPinAsync">
                             Ingresar
                         </button>
                     </div>
@@ -48,683 +50,228 @@
 else
 {
     <div class="container py-4">
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
             <div>
-                <h2 class="fw-bold mb-0">Backoffice del Maestro</h2>
-                <span class="text-muted small">Gestión de estudiantes y resultados de heteroevaluación</span>
+                <h2 class="fw-bold mb-0" style="color: #1F3864;">Panel Docente</h2>
+                <span class="text-muted small">Flujo guiado multi-clase: sala en vivo, nómina, analítica y rúbricas</span>
             </div>
-            <button class="btn btn-outline-secondary" @onclick="LogoutTeacher">Cerrar sesión</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="LogoutTeacherAsync">Cerrar sesión</button>
         </div>
 
-        <div class="card shadow-sm border-0 mb-4">
-            <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-                    <h5 class="fw-bold mb-0">Orquestación de Evaluación</h5>
-                    @if (_evalState.IsOpen && _activeStudent != null)
-                    {
-                        <span class="badge bg-success fs-6">
-                            ACTIVA: @_activeStudent.Nombre (@_activeStudent.Id)
-                        </span>
-                    }
-                    else
-                    {
-                        <span class="badge bg-secondary fs-6">EVALUACIÓN CERRADA</span>
-                    }
-                </div>
+        <ClassSelectorBar Classes="_classes"
+                          SelectedClassId="_selectedClassId"
+                          ActiveClass="_activeClass"
+                          StudentCount="_students.Count"
+                          GroupCount="_groups.Count"
+                          ShowClassesHub="_showClassesHub"
+                          QrRequestClass="_qrRequestClass"
+                          OnClassSelected="SelectClassAsync"
+                          OnToggleClassesHub="() => _showClassesHub = !_showClassesHub"
+                          OnQrClosed="() => _qrRequestClass = null" />
 
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-6">
-                        <label class="form-label small fw-semibold">Estudiante a evaluar</label>
-                        <select class="form-select" @bind="_selectedActiveStudentId">
-                            <option value="">-- Selecciona un estudiante --</option>
-                            @foreach (var s in _students)
-                            {
-                                <option value="@s.Id">@s.Id - @s.Nombre (@s.Carrera)</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <button class="btn btn-success w-100"
-                                @onclick="StartEvaluationAsync"
-                                disabled="@string.IsNullOrEmpty(_selectedActiveStudentId)">
-                            Iniciar Evaluación
-                        </button>
-                    </div>
-                    <div class="col-md-3">
-                        <button class="btn btn-danger w-100"
-                                @onclick="CloseEvaluationAsync"
-                                disabled="@(!_evalState.IsOpen)">
-                            Cerrar Evaluación
-                        </button>
-                    </div>
-                </div>
-                @if (!string.IsNullOrEmpty(_orchestrationMessage))
-                {
-                    <div class="alert alert-info py-2 small mt-3 mb-0">@_orchestrationMessage</div>
-                }
-
-                @if (_evalState.IsOpen && _activeStudent != null)
-                {
-                    double pctDone = _activeEligibleCount > 0 ? (_activeReceivedCount * 100.0 / _activeEligibleCount) : 0;
-                    <div class="mt-3 pt-3 border-top">
-                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                            <div class="small fw-semibold" style="color: #1F3864;">
-                                Progreso en vivo: @_activeReceivedCount / @_activeEligibleCount evaluaciones recibidas
-                            </div>
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="badge bg-light text-dark border">En vivo &middot; actualización automática</span>
-                                @if (_pendingEvaluators.Count > 0)
-                                {
-                                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" @onclick="() => _showPendingList = !_showPendingList">
-                                        @(_showPendingList ? "Ocultar pendientes" : $"Ver pendientes ({_pendingEvaluators.Count})")
-                                    </button>
-                                }
-                            </div>
-                        </div>
-                        <div class="progress" style="height: 10px;">
-                            <div class="progress-bar bg-success"
-                                 role="progressbar"
-                                 style="width: @pctDone.ToString("0", System.Globalization.CultureInfo.InvariantCulture)%"></div>
-                        </div>
-
-                        @if (_showPendingList && _pendingEvaluators.Count > 0)
-                        {
-                            <div class="mt-2 d-flex flex-wrap gap-1">
-                                @foreach (var pend in _pendingEvaluators)
-                                {
-                                    <span class="badge bg-warning text-dark">@pend.Id - @pend.Nombre</span>
-                                }
-                            </div>
-                        }
-                    </div>
-                }
-            </div>
-        </div>
-
-        <ul class="nav nav-tabs mb-4">
-            <li class="nav-item">
-                <button class="nav-link @(_activeTab == 0 ? "active fw-bold" : "")" @onclick="() => SwitchTab(0)">
-                    Estudiantes y Carga Masiva (@_students.Count)
-                </button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link @(_activeTab == 1 ? "active fw-bold" : "")" @onclick="() => SwitchTab(1)">
-                    Resultados y Promedios
-                </button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link @(_activeTab == 2 ? "active fw-bold" : "")" @onclick="() => SwitchTab(2)">
-                    Configuración y Reseteo
-                </button>
-            </li>
-        </ul>
-
-        @if (_activeTab == 0)
+        @if (_showClassesHub)
         {
-            <div class="row g-4">
-                <div class="col-lg-5">
-                    <div class="card shadow-sm border-0 mb-4">
-                        <div class="card-body">
-                            <h5 class="fw-bold mb-2">Cargar Estudiantes (CSV o Excel)</h5>
-                            <p class="text-muted small mb-3">
-                                El archivo debe tener las columnas: <code>Id</code>, <code>Nombre</code>, <code>Carrera</code>, <code>TemaTesis</code>.
-                            </p>
-
-                            <InputFile OnChange="HandleFileUpload" accept=".csv,.xlsx,.xls" class="form-control mb-3" />
-
-                            @if (_isUploading)
-                            {
-                                <div class="text-primary small mb-2">Procesando archivo...</div>
-                            }
-
-                            @if (_importResult != null)
-                            {
-                                <div class="alert alert-info py-2 small">
-                                    <strong>Importación completada:</strong>
-                                    @_importResult.Added agregados, @_importResult.Updated actualizados.
-                                    @if (_importResult.Errors.Count > 0)
-                                    {
-                                        <ul class="mb-0 mt-1 text-danger">
-                                            @foreach (var err in _importResult.Errors.Take(5))
-                                            {
-                                                <li>@err</li>
-                                            }
-                                        </ul>
-                                    }
-                                </div>
-                            }
-
-                            <button class="btn btn-outline-primary btn-sm" @onclick="DownloadTemplateAsync">
-                                Descargar Plantilla Excel (.xlsx)
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="card shadow-sm @(_isEditingStudent ? "border-warning" : "border-0")">
-                        <div class="card-body">
-                            <h5 class="fw-bold mb-3">
-                                @(_isEditingStudent ? $"Editando Estudiante ({_newStudent.Id})" : "Agregar Estudiante")
-                            </h5>
-
-                            @if (!string.IsNullOrEmpty(_formMessage))
-                            {
-                                <div class="alert @(_formIsError ? "alert-danger" : "alert-success") py-2 small">@_formMessage</div>
-                            }
-
-                            <div class="mb-2">
-                                <label class="form-label small fw-semibold">ID (Matrícula)</label>
-                                <input type="text" class="form-control" @bind="_newStudent.Id" placeholder="Ej. 20210001" disabled="@_isEditingStudent" />
-                                @if (_isEditingStudent)
-                                {
-                                    <div class="form-text">La matrícula no se edita para conservar el historial de evaluaciones.</div>
-                                }
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label small fw-semibold">Nombre Completo</label>
-                                <input type="text" class="form-control" @bind="_newStudent.Nombre" placeholder="Ej. Ana García" />
-                            </div>
-                            <div class="mb-2">
-                                <label class="form-label small fw-semibold">Carrera</label>
-                                <input type="text" class="form-control" @bind="_newStudent.Carrera" placeholder="Ej. Ing. en Sistemas" />
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label small fw-semibold">Tema de Tesis</label>
-                                <textarea class="form-control" rows="2" @bind="_newStudent.TemaTesis" placeholder="Título del tema de tesis"></textarea>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-primary flex-grow-1" @onclick="SaveStudentAsync">
-                                    @(_isEditingStudent ? "Actualizar Estudiante" : "Guardar Estudiante")
-                                </button>
-                                @if (_isEditingStudent)
-                                {
-                                    <button class="btn btn-outline-secondary" @onclick="CancelEditStudent">
-                                        Cancelar
-                                    </button>
-                                }
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-lg-7">
-                    <div class="card shadow-sm border-0">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h5 class="fw-bold mb-0">Listado de Estudiantes</h5>
-                                <input type="text" class="form-control form-control-sm w-50"
-                                       placeholder="Buscar por ID o nombre..."
-                                       @bind="_searchTerm" @bind:event="oninput" />
-                            </div>
-
-                            <div class="table-responsive">
-                                <table class="table table-hover align-middle small">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>ID</th>
-                                            <th>Nombre</th>
-                                            <th>Carrera</th>
-                                            <th>Tema de Tesis</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var s in FilteredStudents)
-                                        {
-                                            <tr class="@(_isEditingStudent && _newStudent.Id == s.Id ? "table-warning" : "")">
-                                                <td><span class="badge bg-secondary">@s.Id</span></td>
-                                                <td class="fw-semibold">@s.Nombre</td>
-                                                <td>@s.Carrera</td>
-                                                <td>@s.TemaTesis</td>
-                                                <td class="text-end">
-                                                    @if (_confirmDeleteStudentId == s.Id)
-                                                    {
-                                                        <div class="d-flex justify-content-end gap-1">
-                                                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteStudentAsync(s.Id)">
-                                                                Confirmar
-                                                            </button>
-                                                            <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteStudentId = null">
-                                                                Cancelar
-                                                            </button>
-                                                        </div>
-                                                    }
-                                                    else
-                                                    {
-                                                        <div class="d-flex justify-content-end gap-1">
-                                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEditStudent(s)">
-                                                                Editar
-                                                            </button>
-                                                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteStudentId = s.Id">
-                                                                Eliminar
-                                                            </button>
-                                                        </div>
-                                                    }
-                                                </td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <ClassesHubView Classes="_classes"
+                            SelectedClassId="_selectedClassId"
+                            OnOpenClass="OpenClassFromHubAsync"
+                            OnClassCreated="OpenClassFromHubAsync"
+                            OnShowQr="cls => _qrRequestClass = cls"
+                            OnChanged="ReloadClassDataAsync" />
         }
-        else if (_activeTab == 1)
+        else if (_activeClass != null)
         {
-            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-                <h5 class="fw-bold mb-0">Resumen de Calificaciones</h5>
-                <div class="d-flex flex-wrap align-items-center gap-2">
-                    <span class="badge bg-light text-dark border">Auto-refresco 5s</span>
-                    <button class="btn btn-outline-primary btn-sm" @onclick="RefreshResultsAsync">
-                        Refrescar
+            <div @key="_activeClass.Id">
+                <div class="workflow-tabs mb-4">
+                    <button type="button"
+                            class="workflow-tab-btn @(_activeTab == 0 ? "active" : "")"
+                            @onclick="() => SwitchTabAsync(0)">
+                        1. Sala en Vivo
                     </button>
-                    <button class="btn btn-success btn-sm" @onclick="ExportExcelAsync">
-                        Exportar Resultados (.xlsx)
+                    <button type="button"
+                            class="workflow-tab-btn @(_activeTab == 1 ? "active" : "")"
+                            @onclick="() => SwitchTabAsync(1)">
+                        2. Nómina y Equipos (@_students.Count est. · @_groups.Count grp.)
                     </button>
-                    <button class="btn btn-primary btn-sm"
-                            disabled="@(!_summaries.Any(s => s.EvaluationsReceivedCount > 0))"
-                            @onclick="ExportAllRubricsZipAsync">
-                        Rúbricas (.zip)
+                    <button type="button"
+                            class="workflow-tab-btn @(_activeTab == 2 ? "active" : "")"
+                            @onclick="() => SwitchTabAsync(2)">
+                        3. Calificaciones y Analítica
                     </button>
-                    @if (!_confirmDeleteAllEvals)
-                    {
-                        <button class="btn btn-outline-danger btn-sm"
-                                disabled="@(!_summaries.Any(s => s.EvaluationsReceivedCount > 0))"
-                                @onclick="() => _confirmDeleteAllEvals = true">
-                            Eliminar todas las calificaciones
-                        </button>
-                    }
-                    else
-                    {
-                        <div class="d-flex align-items-center gap-1 bg-danger-subtle px-2 py-1 rounded">
-                            <span class="small text-danger fw-semibold">¿Borrar todas?</span>
-                            <button class="btn btn-danger btn-sm py-0" @onclick="DeleteAllEvaluationsAsync">Sí, eliminar</button>
-                            <button class="btn btn-secondary btn-sm py-0" @onclick="() => _confirmDeleteAllEvals = false">Cancelar</button>
-                        </div>
-                    }
-                </div>
-            </div>
-
-            @if (!string.IsNullOrEmpty(_exportError))
-            {
-                <div class="alert alert-danger py-2 small">@_exportError</div>
-            }
-
-            <div class="card shadow-sm border-0 mb-4">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>ID</th>
-                                <th>Estudiante</th>
-                                <th>Carrera</th>
-                                <th>Tema de Tesis</th>
-                                <th class="text-center">Recibidas</th>
-                                <th class="text-center">Realizadas</th>
-                                <th class="text-center">Promedio</th>
-                                <th>Clasificación</th>
-                                <th>Estado</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in _summaries)
-                            {
-                                <tr>
-                                    <td><span class="badge bg-secondary">@row.Student.Id</span></td>
-                                    <td class="fw-semibold">@row.Student.Nombre</td>
-                                    <td class="small">@row.Student.Carrera</td>
-                                    <td class="small">@row.Student.TemaTesis</td>
-                                    <td class="text-center">@row.EvaluationsReceivedCount</td>
-                                    <td class="text-center">@row.EvaluationsGivenCount</td>
-                                    <td class="text-center fw-bold">
-                                        @(row.EvaluationsReceivedCount > 0 ? row.AverageScore.ToString("0.00") : "-")
-                                    </td>
-                                    <td>@row.Classification</td>
-                                    <td>
-                                        @if (row.EvaluationsReceivedCount == 0)
-                                        {
-                                            <span class="badge bg-secondary">Pendiente</span>
-                                        }
-                                        else if (row.Approved)
-                                        {
-                                            <span class="badge bg-success">Aprobado</span>
-                                        }
-                                        else
-                                        {
-                                            <span class="badge bg-danger">Reprobado</span>
-                                        }
-                                    </td>
-                                    <td class="text-end">
-                                        <div class="d-flex justify-content-end gap-1">
-                                            <button class="btn btn-outline-success btn-sm"
-                                                    disabled="@(row.EvaluationsReceivedCount == 0)"
-                                                    @onclick="() => ExportStudentRubricAsync(row.Student.Id)">
-                                                Rúbrica (.xlsx)
-                                            </button>
-                                            <button class="btn btn-outline-primary btn-sm"
-                                                    disabled="@(row.EvaluationsReceivedCount == 0)"
-                                                    @onclick="() => ViewDetailsAsync(row.Student)">
-                                                Ver Detalle
-                                            </button>
-                                            @if (_confirmClearStudentId == row.Student.Id)
-                                            {
-                                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteStudentEvaluationsAsync(row.Student.Id)">
-                                                    Confirmar
-                                                </button>
-                                                <button class="btn btn-secondary btn-sm" @onclick="() => _confirmClearStudentId = null">
-                                                    Cancelar
-                                                </button>
-                                            }
-                                            else
-                                            {
-                                                <button class="btn btn-outline-danger btn-sm"
-                                                        disabled="@(row.EvaluationsReceivedCount == 0)"
-                                                        @onclick="() => _confirmClearStudentId = row.Student.Id">
-                                                    Limpiar
-                                                </button>
-                                            }
-                                        </div>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            @if (_detailStudent != null)
-            {
-                <div class="card shadow-sm">
-                    <div class="card-header bg-brand d-flex justify-content-between align-items-center">
-                        <strong>Detalle de Evaluaciones: @_detailStudent.Nombre (@_detailStudent.Id)</strong>
-                        <button class="btn btn-sm btn-light" @onclick="() => _detailStudent = null">Cerrar</button>
-                    </div>
-                    <div class="card-body">
-                        @foreach (var eval in _detailEvaluations)
-                        {
-                            bool evalApproved = eval.TotalScore >= _evalState.MinPassingScore;
-                            <div class="border rounded p-3 mb-3">
-                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
-                                    <div>
-                                        <strong>Evaluador:</strong> @eval.Evaluator?.Nombre (@eval.EvaluatorId)
-                                        <span class="text-muted small ms-2">@eval.CreatedAt.AddHours(-4).ToString("dd/MM/yyyy HH:mm")</span>
-                                    </div>
-                                    <div>
-                                        <span class="badge bg-dark me-1">@eval.TotalScore.ToString("0.00") / 100</span>
-                                        <span class="badge @(evalApproved ? "bg-success" : "bg-danger") me-2">
-                                            @eval.Classification
-                                        </span>
-                                        <button class="btn btn-outline-success btn-sm me-1" @onclick="() => ExportSingleEvaluationRubricAsync(eval.Id)">
-                                            Rúbrica (.xlsx)
-                                        </button>
-                                        @if (_confirmDeleteEvalId == eval.Id)
-                                        {
-                                            <button class="btn btn-danger btn-sm me-1" @onclick="() => DeleteSingleEvaluationAsync(eval.Id)">
-                                                Confirmar
-                                            </button>
-                                            <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteEvalId = null">
-                                                Cancelar
-                                            </button>
-                                        }
-                                        else
-                                        {
-                                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteEvalId = eval.Id">
-                                                Eliminar
-                                            </button>
-                                        }
-                                    </div>
-                                </div>
-                                <div class="row g-2 small">
-                                    @foreach (var c in _criterionConfigs)
-                                    {
-                                        var d = eval.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
-                                        if (d != null)
-                                        {
-                                            <div class="col-md-4">
-                                                <div class="p-2 bg-light rounded">
-                                                    <strong>@c.ShortName:</strong> @d.WeightedPoints.ToString("0.00") / @c.Weight (Nivel @d.Score)
-                                                    @if (!string.IsNullOrWhiteSpace(d.Evidence))
-                                                    {
-                                                        <div class="text-muted fst-italic mt-1">"@d.Evidence"</div>
-                                                    }
-                                                </div>
-                                            </div>
-                                        }
-                                    }
-                                </div>
-                            </div>
-                        }
-                    </div>
-                </div>
-            }
-        }
-        else if (_activeTab == 2)
-        {
-            <div class="row g-4">
-                <div class="col-md-6">
-                    <div class="card shadow-sm border-0">
-                        <div class="card-body">
-                            <h5 class="fw-bold mb-3">Parámetros de Evaluación y Seguridad</h5>
-
-                            @if (!string.IsNullOrEmpty(_settingsMessage))
-                            {
-                                <div class="alert alert-info py-2 small">@_settingsMessage</div>
-                            }
-
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Nombre del Profesor (para la Rúbrica)</label>
-                                <input type="text" class="form-control"
-                                       placeholder="Ricardo Cesar Reinoso Rodriguez"
-                                       @bind="_teacherName" />
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Carrera / Programa (Encabezado de Rúbrica)</label>
-                                <input type="text" class="form-control"
-                                       placeholder="Maestría en Enseñanza de la Matemática en el Nivel Secundario"
-                                       @bind="_programName" />
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Mínimo aprobatorio (0 - 100)</label>
-                                <input type="number" step="0.5" min="0" max="100" class="form-control"
-                                       @bind="_minPassingScore" />
-                                <div class="form-text">Puntaje mínimo requerido para marcar a un estudiante como Aprobado.</div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Nueva contraseña / PIN de docente (opcional)</label>
-                                <input type="password" class="form-control"
-                                       placeholder="Dejar vacío para mantener la actual"
-                                       @bind="_newPinInput" />
-                            </div>
-
-                            <button class="btn btn-primary" @onclick="SaveSettingsAsync">
-                                Guardar Configuración
-                            </button>
-                        </div>
-                    </div>
+                    <button type="button"
+                            class="workflow-tab-btn @(_activeTab == 3 ? "active" : "")"
+                            @onclick="() => SwitchTabAsync(3)">
+                        4. Ficha y Rúbrica
+                    </button>
                 </div>
 
-                <div class="col-md-6">
-                    <div class="card shadow-sm border-danger">
-                        <div class="card-body">
-                            <h5 class="fw-bold text-danger mb-2">Resetear Sistema desde 0</h5>
-                            <p class="text-muted small mb-3">
-                                Elimina permanentemente todo el listado de estudiantes, todas las evaluaciones registradas
-                                y cierra cualquier evaluación activa.
-                            </p>
-
-                            @if (!_confirmReset)
-                            {
-                                <button class="btn btn-outline-danger" @onclick="() => _confirmReset = true">
-                                    Eliminar listado y resetear todo
-                                </button>
-                            }
-                            else
-                            {
-                                <div class="alert alert-danger py-2 small">
-                                    <strong>¿Estás seguro?</strong> Esta acción no se puede deshacer.
-                                </div>
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-danger" @onclick="ResetAllAsync">
-                                        Sí, eliminar todo
-                                    </button>
-                                    <button class="btn btn-secondary" @onclick="() => _confirmReset = false">
-                                        Cancelar
-                                    </button>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card shadow-sm border-0 mt-4">
-                <div class="card-body">
+                @if (_activeTab == 0)
+                {
+                    <LiveOrchestrationTab ActiveClass="_activeClass"
+                                          Students="_students"
+                                          Groups="_groups"
+                                          StudentSummaries="_studentSummaries"
+                                          GroupSummaries="_groupSummaries"
+                                          ActiveRound="_activeRound"
+                                          RoundProgress="_roundProgress"
+                                          OnChanged="ReloadClassDataAsync"
+                                          OnOpenQrModal="() => _qrRequestClass = _activeClass" />
+                }
+                else if (_activeTab == 1)
+                {
                     <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-                        <div>
-                            <h5 class="fw-bold mb-0">Criterios de Evaluación y Pesos (%)</h5>
-                            <span class="text-muted small">Ajusta el nombre, etiqueta, peso (%) o desactiva criterios. La suma activa debe ser 100%.</span>
+                        <div class="btn-group" role="group">
+                            <button type="button"
+                                    class="btn btn-sm @(_peopleSubTab == 0 ? "btn-primary" : "btn-outline-primary")"
+                                    @onclick="() => _peopleSubTab = 0">
+                                Estudiantes (@_students.Count)
+                            </button>
+                            <button type="button"
+                                    class="btn btn-sm @(_peopleSubTab == 1 ? "btn-primary" : "btn-outline-primary")"
+                                    @onclick="() => _peopleSubTab = 1">
+                                Equipos de Trabajo (@_groups.Count)
+                            </button>
                         </div>
-                        @{
-                            double activeSum = Math.Round(_criterionConfigs.Where(c => c.IsActive).Sum(c => c.Weight), 2);
-                        }
-                        <span class="badge @(Math.Abs(activeSum - 100.0) <= 0.01 ? "bg-success" : "bg-danger") fs-6">
-                            Total Activo: @activeSum.ToString("0.##")%
+                        <span class="small text-muted">
+                            <strong>@_students.Count(s => s.WorkGroupId != null)</strong> en grupo ·
+                            <strong>@_students.Count(s => s.WorkGroupId == null)</strong> individuales
                         </span>
                     </div>
 
-                    @if (!string.IsNullOrEmpty(_criteriaMessage))
+                    @if (_peopleSubTab == 0)
                     {
-                        <div class="alert alert-info py-2 small">@_criteriaMessage</div>
+                        <StudentsTab ClassRoomId="_activeClass.Id"
+                                     Students="_students"
+                                     Groups="_groups"
+                                     StudentSummaries="_studentSummaries"
+                                     OnLaunchStudent="LaunchStudentRoundAsync"
+                                     OnChanged="ReloadClassDataAsync" />
                     }
-
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Activo</th>
-                                    <th>Nombre Corto</th>
-                                    <th>Título Completo</th>
-                                    <th>Etiqueta</th>
-                                    <th style="width: 110px;">Peso (%)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var cfg in _criterionConfigs)
-                                {
-                                    <tr>
-                                        <td>
-                                            <input type="checkbox" class="form-check-input" @bind="cfg.IsActive" />
-                                        </td>
-                                        <td>
-                                            <input type="text" class="form-control form-control-sm" @bind="cfg.ShortName" />
-                                        </td>
-                                        <td>
-                                            <input type="text" class="form-control form-control-sm" @bind="cfg.FullTitle" />
-                                        </td>
-                                        <td>
-                                            <input type="text" class="form-control form-control-sm" @bind="cfg.ChapterTag" />
-                                        </td>
-                                        <td>
-                                            <input type="number" step="0.5" min="0" max="100" class="form-control form-control-sm" @bind="cfg.Weight" />
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="d-flex gap-2 mt-2">
-                        <button class="btn btn-primary btn-sm" @onclick="SaveCriteriaAsync">
-                            Guardar Criterios y Pesos
-                        </button>
-                        <button class="btn btn-outline-secondary btn-sm" @onclick="ResetCriteriaAsync">
-                            Restaurar valores por defecto
-                        </button>
-                    </div>
-                </div>
+                    else
+                    {
+                        <GroupsTab ClassRoomId="_activeClass.Id"
+                                   Students="_students"
+                                   Groups="_groups"
+                                   GroupSummaries="_groupSummaries"
+                                   OnLaunchGroup="LaunchGroupRoundAsync"
+                                   OnChanged="ReloadClassDataAsync" />
+                    }
+                }
+                else if (_activeTab == 2)
+                {
+                    <ResultsTab ActiveClass="_activeClass"
+                                StudentSummaries="_studentSummaries"
+                                GroupSummaries="_groupSummaries"
+                                CriterionConfigs="_criterionConfigs"
+                                CriterionAnalytics="_criterionAnalytics"
+                                DetailStudent="_detailStudent"
+                                DetailEvaluations="_detailEvaluations"
+                                DetailGroup="_detailGroup"
+                                DetailGroupSubmissions="_detailGroupSubmissions"
+                                OnSelectDetailStudent="SelectDetailStudentAsync"
+                                OnSelectDetailGroup="SelectDetailGroupAsync"
+                                OnChanged="ReloadClassDataAsync" />
+                }
+                else if (_activeTab == 3)
+                {
+                    <SettingsTab ActiveClass="_activeClass"
+                                 CriterionConfigs="_criterionConfigs"
+                                 OnChanged="ReloadClassDataAsync"
+                                 OnClassDuplicated="SelectClassAsync"
+                                 OnClassDeleted="HandleClassDeletedAsync" />
+                }
             </div>
         }
     </div>
 }
 
 @code {
+    private record TeacherAuthState(bool IsAuthenticated, int? SelectedClassId);
+
     private string _pinInput = string.Empty;
     private string? _pinError;
     private int _activeTab = 0;
+    private int _peopleSubTab = 0;
+    private bool _showClassesHub;
+    private ClassRoom? _qrRequestClass;
+
+    private List<ClassRoom> _classes = new();
+    private int _selectedClassId;
+    private ClassRoom? _activeClass;
 
     private List<Student> _students = new();
-    private List<StudentSummary> _summaries = new();
-    private string _searchTerm = string.Empty;
-
-    private Student _newStudent = new();
-    private bool _isEditingStudent;
-    private bool _formIsError;
-    private string? _formMessage;
-    private bool _isUploading;
-    private ImportResult? _importResult;
+    private List<WorkGroup> _groups = new();
+    private List<CriterionConfig> _criterionConfigs = new();
+    private List<StudentSummary> _studentSummaries = new();
+    private List<GroupSummary> _groupSummaries = new();
+    private List<CriterionAnalyticsItem> _criterionAnalytics = new();
+    private ActiveRoundInfo _activeRound = new(false, null, null, new(), string.Empty, null);
+    private ActiveRoundProgress _roundProgress = new(0, 0, new(), new());
 
     private Student? _detailStudent;
     private List<Evaluation> _detailEvaluations = new();
+    private WorkGroup? _detailGroup;
+    private List<GroupSubmissionDetail> _detailGroupSubmissions = new();
 
-    private EvaluationState _evalState = new();
-    private Student? _activeStudent;
-    private string _selectedActiveStudentId = string.Empty;
-    private string? _orchestrationMessage;
-
-    private double _minPassingScore = 70.0;
-    private string _teacherName = "Ricardo Cesar Reinoso Rodriguez";
-    private string _programName = "Maestría en Enseñanza de la Matemática en el Nivel Secundario";
-    private string _newPinInput = string.Empty;
-    private string? _settingsMessage;
-    private string? _exportError;
-    private bool _confirmReset;
-    private bool _confirmDeleteAllEvals;
-    private string? _confirmClearStudentId;
-    private string? _confirmDeleteStudentId;
-    private int? _confirmDeleteEvalId;
-
-    private List<Student> _pendingEvaluators = new();
-    private int _activeReceivedCount;
-    private int _activeEligibleCount;
-    private bool _showPendingList;
     private System.Threading.Timer? _liveTimer;
     private bool _disposed;
     private bool _isRefreshingLive;
-
-    private List<CriterionConfig> _criterionConfigs = new();
-    private string? _criteriaMessage;
-
-    private IEnumerable<Student> FilteredStudents =>
-        string.IsNullOrWhiteSpace(_searchTerm)
-            ? _students
-            : _students.Where(s =>
-                s.Id.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                s.Nombre.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase));
 
     protected override async Task OnInitializedAsync()
     {
         if (Session.IsTeacherAuthenticated)
         {
-            await LoadDataAsync();
+            await InitializeClassesAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !Session.IsTeacherAuthenticated)
+        {
+            try
+            {
+                var stored = await SessionStorage.GetAsync<TeacherAuthState>("hetero_teacher_auth");
+                if (stored.Success && stored.Value?.IsAuthenticated == true)
+                {
+                    Session.IsTeacherAuthenticated = true;
+                    if (stored.Value.SelectedClassId.HasValue)
+                        Session.SelectedClassId = stored.Value.SelectedClassId.Value;
+                    await InitializeClassesAsync();
+                    StateHasChanged();
+                }
+            }
+            catch
+            {
+                // Ignore prerender or expired data protection key gracefully
+            }
+        }
+    }
+
+    private async Task PersistTeacherSessionAsync()
+    {
+        try
+        {
+            await SessionStorage.SetAsync("hetero_teacher_auth", new TeacherAuthState(Session.IsTeacherAuthenticated, Session.SelectedClassId));
+        }
+        catch
+        {
+            // Ignore transient JS interop failure
         }
     }
 
     private async Task HandlePinKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter") await VerifyPin();
+        if (e.Key == "Enter") await VerifyPinAsync();
     }
 
-    private async Task VerifyPin()
+    private async Task VerifyPinAsync()
     {
         if (await EvalService.ValidateTeacherPinAsync(_pinInput))
         {
             Session.IsTeacherAuthenticated = true;
             _pinError = null;
-            await LoadDataAsync();
+            await InitializeClassesAsync();
+            await PersistTeacherSessionAsync();
         }
         else
         {
@@ -732,80 +279,163 @@ else
         }
     }
 
-    private void LogoutTeacher()
+    private async Task LogoutTeacherAsync()
     {
         StopLiveTimer();
         Session.IsTeacherAuthenticated = false;
         _pinInput = string.Empty;
+        _showClassesHub = false;
+        try
+        {
+            await SessionStorage.DeleteAsync("hetero_teacher_auth");
+        }
+        catch
+        {
+            // Ignore transient JS interop failure
+        }
     }
 
-    private async Task SwitchTab(int tab)
+    private async Task InitializeClassesAsync()
+    {
+        _classes = await ClassSvc.GetAllClassesAsync();
+        if (Session.SelectedClassId.HasValue && _classes.Any(c => c.Id == Session.SelectedClassId.Value))
+        {
+            _selectedClassId = Session.SelectedClassId.Value;
+        }
+        else if (_classes.Count > 0)
+        {
+            var firstActive = _classes.FirstOrDefault(c => !c.IsArchived) ?? _classes[0];
+            _selectedClassId = firstActive.Id;
+            Session.SelectedClassId = _selectedClassId;
+        }
+        await ReloadClassDataAsync();
+    }
+
+    private async Task OpenClassFromHubAsync(int classId)
+    {
+        _showClassesHub = false;
+        await SelectClassAsync(classId);
+    }
+
+    private async Task SelectClassAsync(int classId)
+    {
+        _selectedClassId = classId;
+        Session.SelectedClassId = classId;
+        _detailStudent = null;
+        _detailEvaluations.Clear();
+        _detailGroup = null;
+        _detailGroupSubmissions.Clear();
+        _peopleSubTab = 0;
+        await ReloadClassDataAsync();
+        await PersistTeacherSessionAsync();
+    }
+
+    private async Task HandleClassDeletedAsync()
+    {
+        Session.SelectedClassId = null;
+        _detailStudent = null;
+        _detailEvaluations.Clear();
+        _detailGroup = null;
+        _detailGroupSubmissions.Clear();
+        await InitializeClassesAsync();
+        await PersistTeacherSessionAsync();
+    }
+
+    private async Task SwitchTabAsync(int tab)
     {
         _activeTab = tab;
-        await LoadDataAsync();
+        await ReloadClassDataAsync();
     }
 
-    private async Task LoadDataAsync()
+    private async Task LaunchStudentRoundAsync(int studentId)
     {
-        _students = await EvalService.GetAllStudentsAsync();
-        _summaries = await EvalService.GetTeacherSummariesAsync();
-        _criterionConfigs = await EvalService.GetCriterionConfigsAsync();
-        var (state, active) = await EvalService.GetEvaluationStateAsync();
-        _evalState = state;
-        _activeStudent = active;
-        _minPassingScore = state.MinPassingScore;
-        _teacherName = state.TeacherName;
-        _programName = state.ProgramName;
-        if (string.IsNullOrEmpty(_selectedActiveStudentId) && !string.IsNullOrEmpty(state.ActiveStudentId))
+        if (_activeClass == null) return;
+        await EvalService.StartEvaluationRoundAsync(_activeClass.Id, new List<int> { studentId });
+        _activeTab = 0;
+        await ReloadClassDataAsync();
+    }
+
+    private async Task LaunchGroupRoundAsync(WorkGroup group)
+    {
+        if (_activeClass == null) return;
+        var ids = group.Members.Select(m => m.Id).ToList();
+        if (ids.Count == 0) return;
+        await EvalService.StartEvaluationRoundAsync(_activeClass.Id, ids, group.Id, group.Name);
+        _activeTab = 0;
+        await ReloadClassDataAsync();
+    }
+
+    private async Task ReloadClassDataAsync()
+    {
+        _classes = await ClassSvc.GetAllClassesAsync();
+        _activeClass = _classes.FirstOrDefault(c => c.Id == _selectedClassId) ?? _classes.FirstOrDefault();
+        if (_activeClass == null) return;
+        _selectedClassId = _activeClass.Id;
+        Session.SelectedClassId = _selectedClassId;
+
+        _students = await EvalService.GetAllStudentsAsync(_selectedClassId);
+        _groups = await ClassSvc.GetGroupsForClassAsync(_selectedClassId);
+        _criterionConfigs = await EvalService.GetCriterionConfigsAsync(_selectedClassId);
+        _studentSummaries = await EvalService.GetStudentSummariesAsync(_selectedClassId);
+        _groupSummaries = await EvalService.GetGroupSummariesAsync(_selectedClassId);
+        _criterionAnalytics = await EvalService.GetClassCriterionAnalyticsAsync(_selectedClassId);
+        _activeRound = await EvalService.GetActiveRoundAsync(_selectedClassId);
+        _roundProgress = await EvalService.GetActiveRoundProgressAsync(_selectedClassId);
+
+        if (_detailStudent != null)
         {
-            _selectedActiveStudentId = state.ActiveStudentId;
+            _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
         }
-        await RefreshLiveProgressInternalAsync();
+        if (_detailGroup != null)
+        {
+            _detailGroupSubmissions = await EvalService.GetGroupSubmissionDetailsAsync(_detailGroup.Id);
+        }
+
         SyncLiveTimer();
     }
 
-    private async Task RefreshLiveProgressInternalAsync()
+    private async Task SelectDetailStudentAsync(Student? student)
     {
-        if (_evalState.IsOpen && _activeStudent != null)
-        {
-            var activeEvals = await EvalService.GetEvaluationsForStudentAsync(_activeStudent.Id);
-            var doneIds = activeEvals.Select(e => e.EvaluatorId).ToHashSet();
-            _pendingEvaluators = _students
-                .Where(s => s.Id != _activeStudent.Id && !doneIds.Contains(s.Id))
-                .ToList();
-            _activeEligibleCount = Math.Max(0, _students.Count - 1);
-            _activeReceivedCount = _activeEligibleCount - _pendingEvaluators.Count;
-        }
-        else
-        {
-            _pendingEvaluators.Clear();
-            _activeEligibleCount = 0;
-            _activeReceivedCount = 0;
-            _showPendingList = false;
-        }
+        _detailStudent = student;
+        _detailEvaluations = student != null
+            ? await EvalService.GetEvaluationsForStudentAsync(student.Id)
+            : new();
+    }
+
+    private async Task SelectDetailGroupAsync(WorkGroup? group)
+    {
+        _detailGroup = group;
+        _detailGroupSubmissions = group != null
+            ? await EvalService.GetGroupSubmissionDetailsAsync(group.Id)
+            : new();
     }
 
     private void SyncLiveTimer()
     {
-        if (Session.IsTeacherAuthenticated && !_disposed)
+        if (Session.IsTeacherAuthenticated && _selectedClassId > 0 && !_disposed)
         {
             _liveTimer ??= new System.Threading.Timer(_ =>
             {
                 if (_disposed || _isRefreshingLive) return;
                 _ = InvokeAsync(async () =>
                 {
-                    if (_disposed || _isRefreshingLive || !Session.IsTeacherAuthenticated) return;
+                    if (_disposed || _isRefreshingLive || !Session.IsTeacherAuthenticated || _selectedClassId <= 0) return;
                     _isRefreshingLive = true;
                     try
                     {
-                        _summaries = await EvalService.GetTeacherSummariesAsync();
-                        var (state, active) = await EvalService.GetEvaluationStateAsync();
-                        _evalState = state;
-                        _activeStudent = active;
-                        await RefreshLiveProgressInternalAsync();
+                        _activeClass = await ClassSvc.GetClassByIdAsync(_selectedClassId);
+                        _studentSummaries = await EvalService.GetStudentSummariesAsync(_selectedClassId);
+                        _groupSummaries = await EvalService.GetGroupSummariesAsync(_selectedClassId);
+                        _criterionAnalytics = await EvalService.GetClassCriterionAnalyticsAsync(_selectedClassId);
+                        _activeRound = await EvalService.GetActiveRoundAsync(_selectedClassId);
+                        _roundProgress = await EvalService.GetActiveRoundProgressAsync(_selectedClassId);
                         if (_detailStudent != null)
                         {
                             _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
+                        }
+                        if (_detailGroup != null)
+                        {
+                            _detailGroupSubmissions = await EvalService.GetGroupSubmissionDetailsAsync(_detailGroup.Id);
                         }
                         StateHasChanged();
                     }
@@ -836,243 +466,5 @@ else
     {
         _disposed = true;
         StopLiveTimer();
-    }
-
-    private async Task StartEvaluationAsync()
-    {
-        var (ok, msg) = await EvalService.StartEvaluationAsync(_selectedActiveStudentId);
-        _orchestrationMessage = msg;
-        await LoadDataAsync();
-    }
-
-    private async Task CloseEvaluationAsync()
-    {
-        await EvalService.CloseEvaluationAsync();
-        _orchestrationMessage = "Evaluación cerrada.";
-        await LoadDataAsync();
-    }
-
-    private async Task SaveSettingsAsync()
-    {
-        var (ok, msg) = await EvalService.UpdateSettingsAsync(_minPassingScore, _newPinInput, _teacherName, _programName);
-        _settingsMessage = msg;
-        if (ok)
-        {
-            _newPinInput = string.Empty;
-            await LoadDataAsync();
-        }
-    }
-
-    private async Task ResetAllAsync()
-    {
-        await EvalService.ResetAllDataAsync();
-        _confirmReset = false;
-        _selectedActiveStudentId = string.Empty;
-        _detailStudent = null;
-        _settingsMessage = "Sistema reseteado desde 0 correctamente.";
-        await LoadDataAsync();
-    }
-
-    private async Task SaveCriteriaAsync()
-    {
-        var (ok, msg) = await EvalService.SaveCriterionConfigsAsync(_criterionConfigs);
-        _criteriaMessage = msg;
-        if (ok) await LoadDataAsync();
-    }
-
-    private async Task ResetCriteriaAsync()
-    {
-        await EvalService.ResetCriterionConfigsAsync();
-        _criteriaMessage = "Criterios restaurados a los valores por defecto.";
-        await LoadDataAsync();
-    }
-
-    private async Task HandleFileUpload(InputFileChangeEventArgs e)
-    {
-        _isUploading = true;
-        _importResult = null;
-        try
-        {
-            var file = e.File;
-            await using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
-            _importResult = await ImportService.ImportFromStreamAsync(stream, file.Name);
-            await LoadDataAsync();
-        }
-        finally
-        {
-            _isUploading = false;
-        }
-    }
-
-    private async Task DownloadTemplateAsync()
-    {
-        var bytes = ImportService.GenerateTemplateExcel();
-        await JS.InvokeVoidAsync("downloadFileFromBytes", "Plantilla_Estudiantes.xlsx", Convert.ToBase64String(bytes));
-    }
-
-    private void StartEditStudent(Student s)
-    {
-        _newStudent = new Student
-        {
-            Id = s.Id,
-            Nombre = s.Nombre,
-            Carrera = s.Carrera,
-            TemaTesis = s.TemaTesis
-        };
-        _isEditingStudent = true;
-        _formMessage = null;
-        _formIsError = false;
-        _confirmDeleteStudentId = null;
-    }
-
-    private void CancelEditStudent()
-    {
-        _newStudent = new Student();
-        _isEditingStudent = false;
-        _formMessage = null;
-        _formIsError = false;
-    }
-
-    private async Task SaveStudentAsync()
-    {
-        var (ok, msg) = await EvalService.AddOrUpdateStudentAsync(_newStudent);
-        _formIsError = !ok;
-        _formMessage = msg;
-        if (ok)
-        {
-            _isEditingStudent = false;
-            _newStudent = new Student();
-            await LoadDataAsync();
-        }
-    }
-
-    private async Task DeleteStudentAsync(string id)
-    {
-        _confirmDeleteStudentId = null;
-        if (_isEditingStudent && _newStudent.Id == id)
-        {
-            CancelEditStudent();
-        }
-        await EvalService.DeleteStudentAsync(id);
-        await LoadDataAsync();
-    }
-
-    private async Task ViewDetailsAsync(Student student)
-    {
-        _detailStudent = student;
-        _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(student.Id);
-    }
-
-    private async Task RefreshResultsAsync()
-    {
-        await LoadDataAsync();
-        if (_detailStudent != null)
-        {
-            _detailEvaluations = await EvalService.GetEvaluationsForStudentAsync(_detailStudent.Id);
-        }
-    }
-
-    private async Task DeleteSingleEvaluationAsync(int evaluationId)
-    {
-        _confirmDeleteEvalId = null;
-        await EvalService.DeleteEvaluationAsync(evaluationId);
-        await RefreshResultsAsync();
-    }
-
-    private async Task DeleteStudentEvaluationsAsync(string evaluatedId)
-    {
-        _confirmClearStudentId = null;
-        await EvalService.DeleteEvaluationsForStudentAsync(evaluatedId);
-        if (_detailStudent?.Id == evaluatedId)
-        {
-            _detailStudent = null;
-            _detailEvaluations.Clear();
-        }
-        await LoadDataAsync();
-    }
-
-    private async Task DeleteAllEvaluationsAsync()
-    {
-        _confirmDeleteAllEvals = false;
-        await EvalService.DeleteAllEvaluationsAsync();
-        _detailStudent = null;
-        _detailEvaluations.Clear();
-        await LoadDataAsync();
-    }
-
-    private async Task ExportExcelAsync()
-    {
-        _exportError = null;
-        var bytes = await EvalService.ExportResultsExcelAsync();
-        await JS.InvokeVoidAsync("downloadFileFromBytes", "Resultados_Heteroevaluacion.xlsx", Convert.ToBase64String(bytes));
-    }
-
-    private async Task ExportStudentRubricAsync(string evaluatedId)
-    {
-        _exportError = null;
-        try
-        {
-            var result = await EvalService.ExportStudentRubricExcelAsync(evaluatedId);
-            if (result == null)
-            {
-                _exportError = "El estudiante seleccionado no tiene evaluaciones registradas.";
-                return;
-            }
-            await JS.InvokeVoidAsync(
-                "downloadFileFromBytes",
-                result.Value.FileName,
-                Convert.ToBase64String(result.Value.Bytes),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        }
-        catch (Exception ex)
-        {
-            _exportError = $"Error al generar la rúbrica: {ex.Message}";
-        }
-    }
-
-    private async Task ExportSingleEvaluationRubricAsync(int evaluationId)
-    {
-        _exportError = null;
-        try
-        {
-            var result = await EvalService.ExportSingleEvaluationRubricExcelAsync(evaluationId);
-            if (result == null)
-            {
-                _exportError = "No se encontró la evaluación solicitada.";
-                return;
-            }
-            await JS.InvokeVoidAsync(
-                "downloadFileFromBytes",
-                result.Value.FileName,
-                Convert.ToBase64String(result.Value.Bytes),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-        }
-        catch (Exception ex)
-        {
-            _exportError = $"Error al generar la rúbrica individual: {ex.Message}";
-        }
-    }
-
-    private async Task ExportAllRubricsZipAsync()
-    {
-        _exportError = null;
-        try
-        {
-            var result = await EvalService.ExportAllRubricsZipAsync();
-            if (result == null)
-            {
-                _exportError = "No hay estudiantes evaluados para exportar.";
-                return;
-            }
-            await JS.InvokeVoidAsync(
-                "downloadFileFromBytes",
-                result.Value.FileName,
-                Convert.ToBase64String(result.Value.Bytes),
-                "application/zip");
-        }
-        catch (Exception ex)
-        {
-            _exportError = $"Error al generar el archivo ZIP de rúbricas: {ex.Message}";
-        }
     }
 }

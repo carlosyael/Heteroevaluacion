@@ -8,13 +8,16 @@ public class Evaluation
     [Key]
     public int Id { get; set; }
 
-    [Required]
-    [MaxLength(50)]
-    public string EvaluatorId { get; set; } = string.Empty;
+    public int ClassRoomId { get; set; }
 
-    [Required]
-    [MaxLength(50)]
-    public string EvaluatedId { get; set; } = string.Empty;
+    public int EvaluatorId { get; set; }
+
+    public int EvaluatedId { get; set; }
+
+    public int? WorkGroupId { get; set; }
+
+    [MaxLength(64)]
+    public string? GroupSubmissionKey { get; set; }
 
     public double TotalScore { get; set; }
 
@@ -25,11 +28,17 @@ public class Evaluation
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    [ForeignKey(nameof(ClassRoomId))]
+    public ClassRoom? ClassRoom { get; set; }
+
     [ForeignKey(nameof(EvaluatorId))]
     public Student? Evaluator { get; set; }
 
     [ForeignKey(nameof(EvaluatedId))]
     public Student? Evaluated { get; set; }
+
+    [ForeignKey(nameof(WorkGroupId))]
+    public WorkGroup? WorkGroup { get; set; }
 
     public ICollection<EvaluationDetail> Details { get; set; } = new List<EvaluationDetail>();
 }

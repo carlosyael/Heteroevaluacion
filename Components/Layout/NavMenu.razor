@@ -10,7 +10,8 @@
 <input type="checkbox" title="Menú de navegación" class="navbar-toggler" />
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
+    <nav class="nav flex-column pt-2">
+        <div class="nav-section-label px-3">Portales</div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
                 <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Inicio
@@ -23,9 +24,10 @@
         </div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="maestro">
-                <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> Backoffice Maestro
+                <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> Panel Docente
             </NavLink>
         </div>
+        <div class="nav-section-label px-3 mt-2">Recursos</div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="instructivo">
                 <span class="bi bi-book-nav-menu" aria-hidden="true"></span> Instructivo de Uso

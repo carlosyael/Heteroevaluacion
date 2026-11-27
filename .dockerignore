@@ -6,3 +6,4 @@ obj/
 *.suo
 ~$*
 /RUBRICA_TRABAJO_FINAL.xlsx
+dataprotection-keys/

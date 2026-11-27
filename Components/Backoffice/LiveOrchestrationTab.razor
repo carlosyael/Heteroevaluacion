@@ -1,0 +1,513 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@implements IDisposable
+@inject EvaluationService EvalSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                    <h5 class="fw-bold mb-0" style="color: #1F3864;">Orquestación de Ronda en Vivo</h5>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        @if (ActiveRound.IsOpen && ActiveRound.RoundEndsAtUtc.HasValue)
+                        {
+                            var rem = ActiveRound.RoundEndsAtUtc.Value - DateTime.UtcNow;
+                            if (rem > TimeSpan.Zero)
+                            {
+                                <span class="round-countdown-pill">
+                                    ⏱ @FormatTime(rem)
+                                </span>
+                            }
+                        }
+                        @if (ActiveRound.IsOpen && ActiveRound.TargetStudents.Count > 0)
+                        {
+                            <span class="badge bg-success fs-6">
+                                ACTIVA: @(string.IsNullOrWhiteSpace(ActiveRound.ActiveGroupName)
+                                    ? (ActiveRound.TargetStudents.Count > 1
+                                        ? $"Equipo ({ActiveRound.TargetStudents.Count} integrantes)"
+                                        : $"{ActiveRound.TargetStudents[0].Nombre} ({ActiveRound.TargetStudents[0].Matricula})")
+                                    : $"{ActiveRound.ActiveGroupName} ({ActiveRound.TargetStudents.Count} integrantes)")
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary fs-6">Ronda en espera</span>
+                        }
+                    </div>
+                </div>
+
+                @if (ActiveClass?.IsArchived == true)
+                {
+                    <div class="alert alert-warning small">
+                        Esta clase está <strong>archivada</strong>. Reactívala en <strong>Mis Clases</strong> o en <strong>4. Ficha y Rúbrica</strong> para poder iniciar rondas de evaluación.
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(_message))
+                {
+                    <div class="alert @(_isError ? "alert-danger" : "alert-info") py-2 small">@_message</div>
+                }
+
+                <div class="btn-group mb-3 w-100" role="group">
+                    <button type="button"
+                            class="btn btn-sm @(_mode == 0 ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => SetMode(0)">
+                        Grupo predefinido (@Groups.Count)
+                    </button>
+                    <button type="button"
+                            class="btn btn-sm @(_mode == 1 ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => SetMode(1)">
+                        Estudiante individual (@Students.Count)
+                    </button>
+                    <button type="button"
+                            class="btn btn-sm @(_mode == 2 ? "btn-primary" : "btn-outline-primary")"
+                            @onclick="() => SetMode(2)">
+                        Selección al vuelo
+                    </button>
+                </div>
+
+                @if (_mode == 0)
+                {
+                    @if (Groups.Count == 0)
+                    {
+                        <div class="alert alert-warning small">
+                            No hay grupos creados en esta clase. Puedes definirlos en <strong>2. Nómina y Equipos</strong> o usar <strong>Selección al vuelo</strong>.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Selecciona un grupo</label>
+                            <select class="form-select" value="@_selectedGroupId" @onchange="OnGroupSelected">
+                                <option value="">-- Selecciona un grupo --</option>
+                                @foreach (var g in Groups)
+                                {
+                                    var gs = GroupSummaries.FirstOrDefault(x => x.Group.Id == g.Id);
+                                    string statusTag = gs != null && gs.UniqueEvaluatorsCount > 0
+                                        ? $"✓ {gs.UniqueEvaluatorsCount} eval. ({gs.AverageScore:0.0})"
+                                        : "Pendiente";
+                                    <option value="@g.Id">@g.Name (@g.Members.Count int.) — @statusTag</option>
+                                }
+                            </select>
+                        </div>
+
+                        @if (_selectedGroupId.HasValue)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold">
+                                    Integrantes que exponen hoy (desmarca si alguien faltó):
+                                </label>
+                                <div class="border rounded p-2 bg-light d-flex flex-column gap-1" style="max-height: 200px; overflow-y: auto;">
+                                    @foreach (var s in Students)
+                                    {
+                                        bool isChecked = _selectedTargetIds.Contains(s.Id);
+                                        var stSum = StudentSummaries.FirstOrDefault(x => x.Student.Id == s.Id);
+                                        <label class="form-check d-flex align-items-center justify-content-between gap-2 mb-0 small" style="cursor: pointer;">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <input type="checkbox" class="form-check-input mt-0"
+                                                       checked="@isChecked"
+                                                       @onchange="(e) => ToggleTarget(s.Id, (bool)(e.Value ?? false))" />
+                                                <span class="fw-semibold">@s.Nombre</span>
+                                                <span class="text-muted">(@s.Matricula)</span>
+                                                @if (s.WorkGroupId == _selectedGroupId.Value)
+                                                {
+                                                    <span class="badge bg-primary-subtle text-primary border">Del grupo</span>
+                                                }
+                                            </span>
+                                            @if (stSum != null && stSum.EvaluationsReceivedCount > 0)
+                                            {
+                                                <span class="badge bg-success-subtle text-success border">✓ @stSum.EvaluationsReceivedCount eval.</span>
+                                            }
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                }
+                else if (_mode == 1)
+                {
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Estudiante a evaluar</label>
+                        <select class="form-select" @bind="_singleStudentId">
+                            <option value="0">-- Selecciona un estudiante --</option>
+                            @foreach (var s in Students)
+                            {
+                                var stSum = StudentSummaries.FirstOrDefault(x => x.Student.Id == s.Id);
+                                string statusTag = stSum != null && stSum.EvaluationsReceivedCount > 0
+                                    ? $"✓ {stSum.EvaluationsReceivedCount} eval. ({stSum.AverageScore:0.0})"
+                                    : "Pendiente";
+                                <option value="@s.Id">@s.Matricula - @s.Nombre — @statusTag</option>
+                            }
+                        </select>
+                    </div>
+                }
+                else
+                {
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Nombre de equipo / ronda (opcional)</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_adHocGroupName" placeholder="Ej. Equipo Expositor A" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-semibold">Buscar estudiante</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_adHocSearch" @bind:event="oninput" placeholder="Filtrar..." />
+                        </div>
+                    </div>
+                    <div class="border rounded p-2 bg-light mb-3 d-flex flex-column gap-1" style="max-height: 210px; overflow-y: auto;">
+                        @foreach (var s in FilteredAdHocStudents)
+                        {
+                            bool isChecked = _selectedTargetIds.Contains(s.Id);
+                            var stSum = StudentSummaries.FirstOrDefault(x => x.Student.Id == s.Id);
+                            <label class="form-check d-flex align-items-center justify-content-between gap-2 mb-0 small" style="cursor: pointer;">
+                                <span class="d-flex align-items-center gap-2">
+                                    <input type="checkbox" class="form-check-input mt-0"
+                                           checked="@isChecked"
+                                           @onchange="(e) => ToggleTarget(s.Id, (bool)(e.Value ?? false))" />
+                                    <span class="fw-semibold">@s.Nombre</span>
+                                    <span class="text-muted">(@s.Matricula)</span>
+                                    @if (s.WorkGroup != null)
+                                    {
+                                        <span class="badge bg-secondary-subtle text-dark border">@s.WorkGroup.Name</span>
+                                    }
+                                </span>
+                                @if (stSum != null && stSum.EvaluationsReceivedCount > 0)
+                                {
+                                    <span class="badge bg-success-subtle text-success border">✓ @stSum.EvaluationsReceivedCount eval.</span>
+                                }
+                            </label>
+                        }
+                    </div>
+                }
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold mb-1">Temporizador límite</label>
+                        <select class="form-select" @bind="_durationMinutes">
+                            <option value="0">Sin límite de tiempo</option>
+                            <option value="3">3 minutos</option>
+                            <option value="5">5 minutos</option>
+                            <option value="10">10 minutos</option>
+                            <option value="15">15 minutos</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-success w-100"
+                                @onclick="StartRoundAsync"
+                                disabled="@(ActiveClass?.IsArchived == true)">
+                            Iniciar Evaluación
+                        </button>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-danger w-100"
+                                @onclick="CloseRoundAsync"
+                                disabled="@(!ActiveRound.IsOpen)">
+                            Cerrar Evaluación
+                        </button>
+                    </div>
+                </div>
+
+                @if (ActiveRound.IsOpen && ActiveRound.TargetStudents.Count > 0)
+                {
+                    double pct = RoundProgress.EligibleEvaluators > 0
+                        ? (RoundProgress.ReceivedUniqueEvaluators * 100.0 / RoundProgress.EligibleEvaluators)
+                        : 0;
+                    <div class="mt-4 pt-3 border-top">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                            <div class="small fw-bold" style="color: #1F3864;">
+                                Participación en vivo: @RoundProgress.ReceivedUniqueEvaluators / @RoundProgress.EligibleEvaluators evaluadores
+                            </div>
+                            <span class="badge bg-light text-dark border">Auto-refresco 5s</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 11px;">
+                            <div class="progress-bar bg-success"
+                                 role="progressbar"
+                                 style="width: @pct.ToString("0", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                        </div>
+
+                        <div class="small text-muted mb-3">
+                            <strong>Exponiendo ahora:</strong> @string.Join(", ", ActiveRound.TargetStudents.Select(t => t.Nombre))
+                        </div>
+
+                        <div class="btn-group btn-group-sm mb-2" role="group">
+                            <button type="button"
+                                    class="btn @(_progressTab == 0 ? "btn-warning text-dark fw-semibold" : "btn-outline-secondary")"
+                                    @onclick="() => _progressTab = 0">
+                                Pendientes (@RoundProgress.PendingStudents.Count)
+                            </button>
+                            <button type="button"
+                                    class="btn @(_progressTab == 1 ? "btn-success fw-semibold" : "btn-outline-secondary")"
+                                    @onclick="() => _progressTab = 1">
+                                Completados (@RoundProgress.CompletedStudents.Count)
+                            </button>
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-1">
+                            @if (_progressTab == 0)
+                            {
+                                @if (RoundProgress.PendingStudents.Count == 0)
+                                {
+                                    <span class="text-success small fw-semibold">¡Todos los compañeros han enviado su evaluación!</span>
+                                }
+                                else
+                                {
+                                    @foreach (var pend in RoundProgress.PendingStudents)
+                                    {
+                                        <span class="badge bg-warning-subtle text-dark border">@pend.Matricula - @pend.Nombre</span>
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                @if (RoundProgress.CompletedStudents.Count == 0)
+                                {
+                                    <span class="text-muted small">Aún no se reciben evaluaciones en esta ronda.</span>
+                                }
+                                else
+                                {
+                                    @foreach (var comp in RoundProgress.CompletedStudents)
+                                    {
+                                        <span class="badge bg-success-subtle text-success border">✓ @comp.Matricula - @comp.Nombre</span>
+                                    }
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card h-100 portal-card-teacher">
+            <div class="card-body d-flex flex-column gap-3">
+                <div>
+                    <h6 class="fw-bold mb-2" style="color: #1F3864;">Acceso Rápido al Aula</h6>
+                    @if (ActiveClass != null)
+                    {
+                        var joinUrl = $"{Nav.BaseUri.TrimEnd('/')}/estudiante/{ActiveClass.Code}";
+                        <div class="p-2 bg-light rounded border font-monospace small text-break mb-2">
+                            @joinUrl
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-accent btn-sm flex-grow-1" @onclick="() => OnOpenQrModal.InvokeAsync()">
+                                Proyectar Código QR
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => CopyJoinUrlAsync(joinUrl)">
+                                @(_copied ? "Copiado" : "Copiar")
+                            </button>
+                        </div>
+                    }
+                </div>
+
+                @if (ActiveClass != null)
+                {
+                    <div class="border-top pt-3 small d-flex flex-column gap-2">
+                        <h6 class="fw-bold mb-0" style="color: #1F3864;">Resumen de la Clase</h6>
+                        <div><strong>Código:</strong> <span class="badge bg-dark font-monospace">@ActiveClass.Code</span></div>
+                        <div><strong>Profesor:</strong> @ActiveClass.TeacherName</div>
+                        <div><strong>Programa:</strong> @(string.IsNullOrWhiteSpace(ActiveClass.ProgramName) ? "No especificado" : ActiveClass.ProgramName)</div>
+                        <div><strong>Mínimo aprobatorio:</strong> @ActiveClass.MinPassingScore pts</div>
+                        <div>
+                            <strong>Notas visibles a estudiantes:</strong>
+                            @if (ActiveClass.PublishResultsToStudents)
+                            {
+                                <span class="badge bg-success">Publicadas</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Ocultas</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(ActiveClass.Syllabus))
+                        {
+                            <div class="mt-1">
+                                <strong>Temario:</strong>
+                                <div class="p-2 bg-light rounded border mt-1" style="white-space: pre-line; max-height: 170px; overflow-y: auto;">
+                                    @ActiveClass.Syllabus
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ClassRoom? ActiveClass { get; set; }
+    [Parameter, EditorRequired] public List<Student> Students { get; set; } = new();
+    [Parameter, EditorRequired] public List<WorkGroup> Groups { get; set; } = new();
+    [Parameter, EditorRequired] public List<StudentSummary> StudentSummaries { get; set; } = new();
+    [Parameter, EditorRequired] public List<GroupSummary> GroupSummaries { get; set; } = new();
+    [Parameter, EditorRequired] public ActiveRoundInfo ActiveRound { get; set; } = new(false, null, null, new(), string.Empty, null);
+    [Parameter, EditorRequired] public ActiveRoundProgress RoundProgress { get; set; } = new(0, 0, new(), new());
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnOpenQrModal { get; set; }
+
+    private int _mode = 0;
+    private int? _selectedGroupId;
+    private int _singleStudentId;
+    private HashSet<int> _selectedTargetIds = new();
+    private string _adHocGroupName = string.Empty;
+    private string _adHocSearch = string.Empty;
+    private int _durationMinutes = 0;
+    private int _progressTab = 0;
+    private string? _message;
+    private bool _isError;
+    private bool _copied;
+
+    private System.Threading.Timer? _countdownTimer;
+    private bool _disposed;
+    private bool _expiredNotified;
+
+    private IEnumerable<Student> FilteredAdHocStudents =>
+        string.IsNullOrWhiteSpace(_adHocSearch)
+            ? Students
+            : Students.Where(s =>
+                s.Matricula.Contains(_adHocSearch, StringComparison.OrdinalIgnoreCase) ||
+                s.Nombre.Contains(_adHocSearch, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        if (ActiveRound.IsOpen && ActiveRound.RoundEndsAtUtc.HasValue && ActiveRound.RoundEndsAtUtc.Value > DateTime.UtcNow)
+        {
+            _expiredNotified = false;
+            EnsureCountdownTimer();
+        }
+        else
+        {
+            StopCountdownTimer();
+        }
+    }
+
+    private void EnsureCountdownTimer()
+    {
+        if (_disposed || _countdownTimer != null) return;
+        _countdownTimer = new System.Threading.Timer(_ =>
+        {
+            if (_disposed) return;
+            _ = InvokeAsync(async () =>
+            {
+                if (_disposed) return;
+                if (ActiveRound.IsOpen && ActiveRound.RoundEndsAtUtc.HasValue && ActiveRound.RoundEndsAtUtc.Value <= DateTime.UtcNow)
+                {
+                    if (!_expiredNotified)
+                    {
+                        _expiredNotified = true;
+                        StopCountdownTimer();
+                        await OnChanged.InvokeAsync();
+                    }
+                }
+                else
+                {
+                    StateHasChanged();
+                }
+            });
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopCountdownTimer()
+    {
+        _countdownTimer?.Dispose();
+        _countdownTimer = null;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        StopCountdownTimer();
+    }
+
+    private static string FormatTime(TimeSpan rem)
+    {
+        if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
+        return $"{(int)rem.TotalMinutes:00}:{rem.Seconds:00}";
+    }
+
+    private void SetMode(int mode)
+    {
+        _mode = mode;
+        _message = null;
+        if (mode == 2 && _selectedTargetIds.Count == 0 && ActiveRound.TargetStudents.Count > 0)
+        {
+            _selectedTargetIds = ActiveRound.TargetStudents.Select(t => t.Id).ToHashSet();
+        }
+    }
+
+    private void OnGroupSelected(ChangeEventArgs e)
+    {
+        _message = null;
+        if (int.TryParse(e.Value?.ToString(), out int gid))
+        {
+            _selectedGroupId = gid;
+            var grp = Groups.FirstOrDefault(g => g.Id == gid);
+            _selectedTargetIds = grp != null
+                ? grp.Members.Select(m => m.Id).ToHashSet()
+                : new();
+        }
+        else
+        {
+            _selectedGroupId = null;
+            _selectedTargetIds.Clear();
+        }
+    }
+
+    private void ToggleTarget(int studentId, bool checkedVal)
+    {
+        if (checkedVal) _selectedTargetIds.Add(studentId);
+        else _selectedTargetIds.Remove(studentId);
+    }
+
+    private async Task StartRoundAsync()
+    {
+        if (ActiveClass == null) return;
+        List<int> ids;
+        int? groupId = null;
+        string? groupName = null;
+
+        if (_mode == 0)
+        {
+            ids = _selectedTargetIds.ToList();
+            groupId = _selectedGroupId;
+            groupName = Groups.FirstOrDefault(g => g.Id == _selectedGroupId)?.Name;
+        }
+        else if (_mode == 1)
+        {
+            ids = _singleStudentId > 0 ? new List<int> { _singleStudentId } : new();
+        }
+        else
+        {
+            ids = _selectedTargetIds.ToList();
+            groupName = string.IsNullOrWhiteSpace(_adHocGroupName) ? null : _adHocGroupName.Trim();
+        }
+
+        int? duration = _durationMinutes > 0 ? _durationMinutes : null;
+        var (ok, msg) = await EvalSvc.StartEvaluationRoundAsync(ActiveClass.Id, ids, groupId, groupName, duration);
+        _isError = !ok;
+        _message = msg;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task CloseRoundAsync()
+    {
+        if (ActiveClass == null) return;
+        await EvalSvc.CloseEvaluationRoundAsync(ActiveClass.Id);
+        _isError = false;
+        _message = "Evaluación cerrada.";
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task CopyJoinUrlAsync(string url)
+    {
+        await JS.InvokeVoidAsync("copyTextToClipboard", url);
+        _copied = true;
+        StateHasChanged();
+        await Task.Delay(2000);
+        _copied = false;
+    }
+}

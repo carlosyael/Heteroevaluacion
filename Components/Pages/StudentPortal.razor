@@ -1,10 +1,16 @@
 @page "/estudiante"
+@page "/estudiante/{ClassCode}"
 @rendermode InteractiveServer
 @implements IDisposable
+@using System.Text.Json
 @using HeteroevaluacionApp.Models
 @using HeteroevaluacionApp.Services
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject ClassService ClassSvc
 @inject EvaluationService EvalService
 @inject SessionService Session
+@inject ProtectedLocalStorage LocalStorage
+@inject IJSRuntime JS
 
 <PageTitle>Portal de Estudiantes - Heteroevaluación</PageTitle>
 
@@ -17,47 +23,87 @@
                     <div class="card-body p-4">
                         <h3 class="fw-bold mb-2" style="color: #1F3864;">Portal de Estudiantes</h3>
                         <p class="text-muted small mb-4">
-                            Ingresa tu ID de estudiante (matrícula) cargado por el maestro para acceder.
+                            Selecciona tu clase e ingresa tu matrícula registrada por el maestro para acceder.
                         </p>
+
+                        @if (_archivedNoticeClass != null)
+                        {
+                            <div class="alert alert-warning small py-2">
+                                La clase <strong>@_archivedNoticeClass.Name (@_archivedNoticeClass.Code)</strong> se encuentra archivada y ya no acepta nuevas evaluaciones.
+                            </div>
+                        }
 
                         @if (!string.IsNullOrEmpty(_loginError))
                         {
                             <div class="alert alert-danger py-2">@_loginError</div>
                         }
 
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">ID de Estudiante</label>
-                            <input type="text" class="form-control form-control-lg"
-                                   placeholder="Ej. 20210001"
-                                   @bind="_loginId"
-                                   @bind:event="oninput"
-                                   @onkeydown="HandleLoginKeyDown" />
-                        </div>
+                        @if (_classes.Count == 0)
+                        {
+                            <div class="alert alert-info small mb-0">
+                                No hay clases activas disponibles en este momento. Consulta con tu docente.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Clase</label>
+                                <select class="form-select form-select-lg" @bind="_selectedClassId">
+                                    @foreach (var cls in _classes)
+                                    {
+                                        <option value="@cls.Id">@cls.Name (@cls.Code)</option>
+                                    }
+                                </select>
+                            </div>
 
-                        <button class="btn btn-primary w-100 btn-lg" @onclick="LoginAsync" disabled="@_isLoading">
-                            @(_isLoading ? "Validando..." : "Acceder")
-                        </button>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Matrícula / ID de Estudiante</label>
+                                <input type="text" class="form-control form-control-lg"
+                                       placeholder="Ej. 20210001"
+                                       @bind="_loginMatricula"
+                                       @bind:event="oninput"
+                                       @onkeydown="HandleLoginKeyDown" />
+                            </div>
+
+                            <button class="btn btn-primary w-100 btn-lg" @onclick="LoginAsync" disabled="@(_isLoading || _selectedClassId <= 0)">
+                                @(_isLoading ? "Validando..." : "Acceder")
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
         </div>
     </div>
 }
-else if (_selectedTarget == null)
+else if (!_isEvaluating)
 {
     <div class="container py-4">
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+        <div class="d-flex flex-wrap justify-content-between align-items-start mb-3 gap-2">
             <div>
                 <h2 class="fw-bold mb-1" style="color: #1F3864;">Bienvenido, @Session.CurrentStudent.Nombre</h2>
-                <div class="text-muted">
-                    <strong>ID:</strong> @Session.CurrentStudent.Id &middot;
-                    <strong>Carrera:</strong> @Session.CurrentStudent.Carrera
+                <div class="text-muted d-flex flex-wrap align-items-center gap-2">
+                    <span><strong>Matrícula:</strong> @Session.CurrentStudent.Matricula</span>
+                    <span>&middot;</span>
+                    <span><strong>Carrera:</strong> @Session.CurrentStudent.Carrera</span>
+                    @if (_myGroup != null)
+                    {
+                        <span class="badge bg-primary-subtle text-primary border">@_myGroup.Name</span>
+                    }
                 </div>
-                <div class="text-muted small">
-                    <strong>Tu Tema de Tesis:</strong> @Session.CurrentStudent.TemaTesis
-                </div>
+                @if (_currentClass != null)
+                {
+                    <div class="text-muted small mt-1">
+                        <strong>Clase:</strong> @_currentClass.Name (@_currentClass.Code) &middot;
+                        <strong>Profesor:</strong> @_currentClass.TeacherName
+                    </div>
+                }
             </div>
-            <button class="btn btn-outline-secondary" @onclick="Logout">Cerrar sesión</button>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary btn-sm" @onclick="LoadStudentDashboardDataAsync">
+                    Actualizar
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="LogoutAsync">Cerrar sesión</button>
+            </div>
         </div>
 
         @if (!string.IsNullOrEmpty(_statusMessage))
@@ -68,63 +114,119 @@ else if (_selectedTarget == null)
             </div>
         }
 
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-            <h4 class="fw-bold mb-0" style="color: #1F3864;">Evaluación Activa</h4>
-            <div class="d-flex align-items-center gap-2">
-                <span class="badge bg-light text-dark border">Actualización automática</span>
-                <button class="btn btn-outline-primary btn-sm" @onclick="LoadClassmatesAsync">
-                    Actualizar estado
-                </button>
-            </div>
+        <div class="workflow-tabs mb-4">
+            <button type="button"
+                    class="workflow-tab-btn @(_studentTab == 0 ? "active" : "")"
+                    @onclick="() => _studentTab = 0">
+                Evaluar Exposición
+                @if (_roundStatus?.Round.IsOpen == true && !_roundStatus.IsSelfOrInActiveTeam && !_roundStatus.AlreadyEvaluatedRound)
+                {
+                    <span class="badge bg-warning text-dark ms-1">Activa</span>
+                }
+            </button>
+            <button type="button"
+                    class="workflow-tab-btn @(_studentTab == 1 ? "active" : "")"
+                    @onclick="() => _studentTab = 1">
+                Mis Resultados y Equipo
+            </button>
+            <button type="button"
+                    class="workflow-tab-btn @(_studentTab == 2 ? "active" : "")"
+                    @onclick="() => _studentTab = 2">
+                Temario y Rúbrica
+            </button>
         </div>
 
-        @if (!_evalState.IsOpen || _activeTarget == null)
+        @if (_studentTab == 0)
         {
-            <div class="alert alert-warning">
-                No hay ninguna evaluación activa en este momento. Espera a que el maestro inicie el proceso.
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                <h4 class="fw-bold mb-0" style="color: #1F3864;">Ronda de Evaluación</h4>
+                <div class="d-flex align-items-center gap-2">
+                    @if (_roundStatus?.Round is { IsOpen: true, RoundEndsAtUtc: DateTime endsAt })
+                    {
+                        var rem = endsAt - DateTime.UtcNow;
+                        if (rem > TimeSpan.Zero)
+                        {
+                            <span class="round-countdown-pill">⏱ Restan @FormatTime(rem)</span>
+                        }
+                    }
+                    <span class="badge bg-light text-dark border">Auto-refresco 5s</span>
+                </div>
             </div>
-        }
-        else if (_activeTarget.Id == Session.CurrentStudent.Id)
-        {
-            <div class="alert alert-info">
-                Eres el estudiante que está siendo evaluado actualmente (<strong>@_activeTarget.Nombre</strong>). No puedes evaluarte a ti mismo.
-            </div>
-        }
-        else
-        {
-            var activeStatus = _classmates.FirstOrDefault(c => c.Student.Id == _activeTarget.Id);
-            if (activeStatus != null)
+
+            @if (_roundStatus == null || !_roundStatus.Round.IsOpen || _roundStatus.Round.TargetStudents.Count == 0)
             {
+                <div class="alert alert-warning">
+                    No hay ninguna evaluación activa en esta clase en este momento. Espera a que el maestro inicie la ronda.
+                </div>
+            }
+            else if (_roundStatus.IsSelfOrInActiveTeam)
+            {
+                <div class="alert alert-info">
+                    Tu equipo o tú mismo están exponiendo en la ronda actual. No puedes evaluarte a ti mismo ni a tu propio equipo.
+                </div>
+            }
+            else
+            {
+                var round = _roundStatus.Round;
+                bool isGroup = round.TargetStudents.Count > 1;
                 <div class="row g-3">
-                    <div class="col-md-7 col-lg-5">
+                    <div class="col-md-8 col-lg-6">
                         <div class="card h-100 portal-card-student">
                             <div class="card-body d-flex flex-column">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <span class="badge bg-secondary">@activeStatus.Student.Id</span>
-                                    @if (activeStatus.AlreadyEvaluated)
+                                    @if (isGroup)
                                     {
-                                        <span class="badge bg-success">Evaluado (@activeStatus.ScoreGiven?.ToString("0.0"))</span>
+                                        <span class="badge bg-primary">
+                                            @(string.IsNullOrWhiteSpace(round.ActiveGroupName) ? $"Evaluación Grupal ({round.TargetStudents.Count})" : round.ActiveGroupName)
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">@round.TargetStudents[0].Matricula</span>
+                                    }
+
+                                    @if (_roundStatus.AlreadyEvaluatedRound)
+                                    {
+                                        <span class="badge bg-success">Evaluado (@_roundStatus.ScoreGiven?.ToString("0.0"))</span>
                                     }
                                     else
                                     {
                                         <span class="badge bg-warning text-dark">Pendiente</span>
                                     }
                                 </div>
-                                <h5 class="card-title fw-bold mb-1" style="color: #1F3864;">@activeStatus.Student.Nombre</h5>
-                                <p class="text-muted small mb-2">@activeStatus.Student.Carrera</p>
+
+                                @if (isGroup)
+                                {
+                                    <h5 class="card-title fw-bold mb-2" style="color: #1F3864;">
+                                        @(string.IsNullOrWhiteSpace(round.ActiveGroupName) ? "Exposición en Equipo" : round.ActiveGroupName)
+                                    </h5>
+                                    <div class="mb-2 d-flex flex-wrap gap-1">
+                                        @foreach (var member in round.TargetStudents)
+                                        {
+                                            <span class="badge bg-light text-dark border">@member.Nombre (@member.Matricula)</span>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <h5 class="card-title fw-bold mb-1" style="color: #1F3864;">@round.TargetStudents[0].Nombre</h5>
+                                    <p class="text-muted small mb-2">@round.TargetStudents[0].Carrera</p>
+                                }
+
                                 <p class="card-text small flex-grow-1">
-                                    <strong>Tesis:</strong> @activeStatus.Student.TemaTesis
+                                    <strong>Tema:</strong> @round.DisplayTopic
                                 </p>
-                                @if (activeStatus.AlreadyEvaluated)
+
+                                @if (_roundStatus.AlreadyEvaluatedRound)
                                 {
                                     <button class="btn btn-outline-success w-100 mt-2" disabled>
-                                        Ya calificado (@activeStatus.ClassificationGiven)
+                                        Ya calificado (@_roundStatus.ClassificationGiven)
                                     </button>
                                 }
                                 else
                                 {
-                                    <button class="btn btn-accent w-100 mt-2" @onclick="() => StartEvaluation(activeStatus.Student)">
-                                        Evaluar Tesis
+                                    <button class="btn btn-accent w-100 mt-2" @onclick="StartEvaluationAsync">
+                                        @(isGroup ? "Evaluar Equipo" : "Evaluar Tesis")
                                     </button>
                                 }
                             </div>
@@ -133,12 +235,193 @@ else if (_selectedTarget == null)
                 </div>
             }
         }
+        else if (_studentTab == 1)
+        {
+            <div class="row g-4">
+                <div class="col-md-5 d-flex flex-column gap-3">
+                    <div class="card portal-card-student">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-2" style="color: #1F3864;">Mi Participación</h5>
+                            <div class="small mb-2">
+                                <strong>Tema de Tesis:</strong>
+                                <div class="text-muted mt-1">@Session.CurrentStudent.TemaTesis</div>
+                            </div>
+                            <div class="d-flex gap-3 mt-3 pt-2 border-top small">
+                                <div>
+                                    <div class="text-muted">Evaluaciones hechas</div>
+                                    <div class="fw-bold fs-5" style="color: #1F3864;">@(_mySummary?.EvaluationsGivenCount ?? 0)</div>
+                                </div>
+                                <div>
+                                    <div class="text-muted">Evaluaciones recibidas</div>
+                                    <div class="fw-bold fs-5" style="color: #1F3864;">@(_mySummary?.EvaluationsReceivedCount ?? 0)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card portal-card-teacher">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-2" style="color: #1F3864;">Mi Equipo de Trabajo</h5>
+                            @if (_myGroup == null)
+                            {
+                                <p class="text-muted small mb-0">
+                                    Participas de forma individual (sin grupo asignado en esta clase).
+                                </p>
+                            }
+                            else
+                            {
+                                <div class="fw-bold mb-1">@_myGroup.Name</div>
+                                @if (!string.IsNullOrWhiteSpace(_myGroup.Topic))
+                                {
+                                    <div class="text-muted small mb-2">@_myGroup.Topic</div>
+                                }
+                                <div class="d-flex flex-column gap-1 mt-2">
+                                    @foreach (var m in _myGroup.Members)
+                                    {
+                                        <div class="p-2 bg-light rounded border small d-flex justify-content-between align-items-center">
+                                            <span>@m.Nombre <span class="text-muted">(@m.Matricula)</span></span>
+                                            @if (m.Id == Session.CurrentStudent.Id)
+                                            {
+                                                <span class="badge bg-primary">Tú</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-7">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-3" style="color: #1F3864;">Mis Resultados y Retroalimentación Anónima</h5>
+                            @if (_myFeedback == null)
+                            {
+                                <div class="alert alert-light border small mb-0">
+                                    El docente aún no ha publicado las calificaciones para los estudiantes en esta clase. Cuando las habilite, podrás ver aquí tu promedio y los comentarios anónimos de tus compañeros.
+                                </div>
+                            }
+                            else if (_myFeedback.EvaluationsCount == 0)
+                            {
+                                <div class="alert alert-info small mb-0">
+                                    Aún no tienes evaluaciones recibidas en esta clase.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-flex flex-wrap align-items-center justify-content-between p-3 rounded bg-light border mb-3 gap-2">
+                                    <div>
+                                        <div class="small text-muted">Promedio acumulado (@_myFeedback.EvaluationsCount evaluaciones anónimas)</div>
+                                        <div class="fs-2 fw-bold" style="color: #1F3864;">
+                                            @_myFeedback.AverageScore.ToString("0.00") <span class="fs-6 text-muted fw-normal">/ 100</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="fw-bold">@_myFeedback.Classification</div>
+                                        <span class="badge @(_myFeedback.Approved ? "bg-success" : "bg-danger")">
+                                            @(_myFeedback.Approved ? "Aprobado" : "Reprobado") (mín. @_myFeedback.MinPassingScore)
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="d-flex flex-column gap-2">
+                                    @foreach (var cf in _myFeedback.Criteria)
+                                    {
+                                        string barClass = cf.AchievementPercent >= 85 ? "bg-success"
+                                            : cf.AchievementPercent >= 70 ? "bg-warning"
+                                            : "bg-danger";
+                                        <div class="p-2 border rounded">
+                                            <div class="d-flex justify-content-between align-items-center small mb-1">
+                                                <span class="fw-semibold">@cf.FullTitle</span>
+                                                <span class="fw-bold">@cf.AverageWeightedPoints.ToString("0.00") / @cf.Weight</span>
+                                            </div>
+                                            <div class="progress mb-1" style="height: 7px;">
+                                                <div class="progress-bar @barClass"
+                                                     style="width: @cf.AchievementPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                                            </div>
+                                            @if (cf.AnonymousComments.Count > 0)
+                                            {
+                                                <ul class="mb-0 mt-2 ps-3 small text-muted fst-italic">
+                                                    @foreach (var comment in cf.AnonymousComments)
+                                                    {
+                                                        <li>"@comment"</li>
+                                                    }
+                                                </ul>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="row g-4">
+                <div class="col-md-5">
+                    <div class="card h-100 portal-card-student">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-3" style="color: #1F3864;">Temario de la Clase</h5>
+                            @if (string.IsNullOrWhiteSpace(_currentClass?.Syllabus))
+                            {
+                                <p class="text-muted small mb-0">
+                                    El maestro aún no ha registrado un temario para esta clase.
+                                </p>
+                            }
+                            else
+                            {
+                                <div class="small" style="white-space: pre-line; line-height: 1.6;">@_currentClass.Syllabus</div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-7">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h5 class="fw-bold mb-1" style="color: #1F3864;">Criterios y Pesos de Evaluación</h5>
+                            <p class="text-muted small mb-3">
+                                Escala por criterio: <code>4 Excelente</code>, <code>3 Bueno</code>, <code>2 Satisfactorio</code>, <code>1 Deficiente</code>, <code>0 No aceptable</code>.
+                                Mínimo aprobatorio: <strong>@(_currentClass?.MinPassingScore ?? 70) pts</strong>.
+                            </p>
+                            <div class="table-responsive">
+                                <table class="table table-sm align-middle small mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Criterio</th>
+                                            <th>Sección</th>
+                                            <th class="text-end">Peso (%)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var cfg in _activeCriteria)
+                                        {
+                                            <tr>
+                                                <td class="fw-semibold">@cfg.FullTitle</td>
+                                                <td><span class="badge bg-light text-dark border">@cfg.ChapterTag</span></td>
+                                                <td class="text-end fw-bold">@cfg.Weight%</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 }
-else
+else if (_roundStatus != null)
 {
     int answeredCount = _activeCriteria.Count(c => _scores.TryGetValue(c.Key, out var v) && v.HasValue);
     bool allAnswered = _activeCriteria.Count > 0 && answeredCount == _activeCriteria.Count;
+    var round = _roundStatus.Round;
+    bool isGroup = round.TargetStudents.Count > 1;
+    double minPassing = _currentClass?.MinPassingScore ?? 70.0;
 
     <div class="container-fluid py-3 px-0 px-md-2 hetero-shell">
         <div class="eval-banner mb-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -148,17 +431,44 @@ else
                     <span class="eval-progress-pill">
                         Criterios completados: @answeredCount / @_activeCriteria.Count
                     </span>
+                    @if (round.RoundEndsAtUtc.HasValue)
+                    {
+                        var rem = round.RoundEndsAtUtc.Value - DateTime.UtcNow;
+                        if (rem > TimeSpan.Zero)
+                        {
+                            <span class="round-countdown-pill">⏱ @FormatTime(rem)</span>
+                        }
+                    }
+                    @if (_draftRestored)
+                    {
+                        <span class="badge bg-light text-dark">Borrador restaurado</span>
+                    }
                 </div>
-                <div class="opacity-90">
-                    Evaluando a: <strong>@_selectedTarget.Nombre</strong> (@_selectedTarget.Id) &middot; @_selectedTarget.Carrera
-                </div>
+                @if (isGroup)
+                {
+                    <div class="opacity-90">
+                        Evaluando a: <strong>@(string.IsNullOrWhiteSpace(round.ActiveGroupName) ? "Equipo" : round.ActiveGroupName)</strong>
+                        &middot; @string.Join(", ", round.TargetStudents.Select(t => $"{t.Nombre} ({t.Matricula})"))
+                    </div>
+                }
+                else
+                {
+                    <div class="opacity-90">
+                        Evaluando a: <strong>@round.TargetStudents[0].Nombre</strong> (@round.TargetStudents[0].Matricula) &middot; @round.TargetStudents[0].Carrera
+                    </div>
+                }
                 <div class="small opacity-75">
-                    <strong>Tema:</strong> @_selectedTarget.TemaTesis
+                    <strong>Tema:</strong> @round.DisplayTopic
                 </div>
             </div>
-            <button class="btn btn-outline-light btn-sm" @onclick="CancelEvaluation">
-                &larr; Volver al listado
-            </button>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-warning btn-sm" @onclick="ClearDraftSelectionAsync">
+                    Limpiar selección
+                </button>
+                <button class="btn btn-outline-light btn-sm" @onclick="CancelEvaluation">
+                    &larr; Volver
+                </button>
+            </div>
         </div>
 
         @if (!string.IsNullOrEmpty(_evalError))
@@ -175,6 +485,7 @@ else
                     bool isScored = currentScore.HasValue;
                     var selectedLevel = isScored ? criterion.Levels.First(l => l.Score == currentScore!.Value) : null;
                     double weighted = isScored ? RubricDefinition.CalculateWeighted(cfg.Weight, currentScore!.Value) : 0.0;
+                    string evText = _evidences.GetValueOrDefault(cfg.Key, string.Empty);
 
                     <div class="hetero-card @(isScored ? "scored" : "pending")">
                         <div class="criterion-header">
@@ -191,7 +502,7 @@ else
                                 bool isActive = currentScore == lvl.Score;
                                 <button type="button"
                                         class="score-btn @(isActive ? "active" : "")"
-                                        @onclick="() => SelectScore(cfg.Key, lvl.Score)">
+                                        @onclick="() => SelectScoreAsync(cfg.Key, lvl.Score)">
                                     <span class="score-num">@lvl.Score</span>
                                     <span class="score-label">@lvl.Label</span>
                                 </button>
@@ -215,7 +526,9 @@ else
                         <textarea class="evidence-input"
                                   rows="2"
                                   placeholder="Escribe observaciones o evidencias para este criterio..."
-                                  @bind="_evidences[cfg.Key]"></textarea>
+                                  value="@evText"
+                                  @oninput="(e) => UpdateEvidenceLocal(cfg.Key, e.Value?.ToString())"
+                                  @onchange="SaveDraftAsync"></textarea>
 
                         <div class="weighted-points-text">
                             @if (isScored)
@@ -239,7 +552,7 @@ else
                         @{
                             double total = CalculateTotal();
                             string classification = allAnswered ? RubricDefinition.Classify(total) : "En progreso";
-                            bool approved = total >= _evalState.MinPassingScore;
+                            bool approved = total >= minPassing;
                             double radius = 36;
                             double circumference = 2 * Math.PI * radius;
                             double dashOffset = circumference * (1.0 - Math.Clamp(total, 0, 100) / 100.0);
@@ -292,13 +605,13 @@ else
                         </div>
 
                         <div class="legend-footer">
-                            Mínimo aprobatorio: @_evalState.MinPassingScore
+                            Mínimo aprobatorio: @minPassing · Borrador guardado automáticamente
                         </div>
 
                         @if (!_confirmSubmit)
                         {
                             <button class="btn btn-accent w-100 mt-3 py-2"
-                                    @onclick="RequestSubmitConfirmation"
+                                    @onclick="RequestSubmitConfirmationAsync"
                                     disabled="@(!allAnswered || _isSubmitting)">
                                 @(allAnswered ? "Enviar Evaluación" : $"Completa los {_activeCriteria.Count} criterios ({answeredCount}/{_activeCriteria.Count})")
                             </button>
@@ -331,31 +644,131 @@ else
 }
 
 @code {
-    private string _loginId = string.Empty;
+    [Parameter] public string? ClassCode { get; set; }
+
+    private record StudentSessionState(int ClassId, int StudentId);
+
+    private class RubricDraftPayload
+    {
+        public Dictionary<string, int?> Scores { get; set; } = new();
+        public Dictionary<string, string> Evidences { get; set; } = new();
+    }
+
+    private List<ClassRoom> _classes = new();
+    private int _selectedClassId;
+    private ClassRoom? _currentClass;
+    private ClassRoom? _archivedNoticeClass;
+
+    private int _studentTab = 0;
+    private string _loginMatricula = string.Empty;
     private string? _loginError;
     private string? _statusMessage;
     private string? _evalError;
     private bool _isLoading;
     private bool _isSubmitting;
+    private bool _isEvaluating;
     private bool _confirmSubmit;
+    private bool _draftRestored;
+    private string? _currentDraftKey;
+
     private System.Threading.Timer? _pollTimer;
+    private System.Threading.Timer? _countdownTimer;
     private bool _disposed;
     private bool _isPolling;
+    private bool _timerExpiredSynced;
 
-    private List<ClassmateStatus> _classmates = new();
+    private StudentRoundStatus? _roundStatus;
+    private StudentSummary? _mySummary;
+    private WorkGroup? _myGroup;
+    private StudentFeedbackReport? _myFeedback;
     private List<CriterionConfig> _activeCriteria = new();
-    private EvaluationState _evalState = new();
-    private Student? _activeTarget;
-    private Student? _selectedTarget;
     private Dictionary<string, int?> _scores = new();
     private Dictionary<string, string> _evidences = new();
 
     protected override async Task OnInitializedAsync()
     {
-        if (Session.CurrentStudent != null)
+        _classes = await ClassSvc.GetActiveClassesForStudentsAsync();
+        if (!string.IsNullOrWhiteSpace(ClassCode))
         {
-            await LoadClassmatesAsync();
-            SyncPollTimer();
+            var matched = _classes.FirstOrDefault(c => c.Code.Equals(ClassCode.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (matched != null)
+            {
+                _selectedClassId = matched.Id;
+            }
+            else
+            {
+                var allMatch = await ClassSvc.GetClassByCodeAsync(ClassCode);
+                if (allMatch != null && allMatch.IsArchived)
+                {
+                    _archivedNoticeClass = allMatch;
+                }
+            }
+        }
+        if (_selectedClassId == 0 && _classes.Count > 0)
+        {
+            _selectedClassId = _classes[0].Id;
+        }
+
+        if (Session.CurrentStudent != null && Session.CurrentStudentClassId.HasValue)
+        {
+            _selectedClassId = Session.CurrentStudentClassId.Value;
+            await LoadStudentDashboardDataAsync();
+            SyncTimers();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Session.CurrentStudent == null)
+        {
+            try
+            {
+                var stored = await LocalStorage.GetAsync<StudentSessionState>("hetero_student_auth");
+                if (stored.Success && stored.Value != null)
+                {
+                    // Avoid silently overriding an explicit QR class link that points to a different class
+                    bool matchesUrl = string.IsNullOrWhiteSpace(ClassCode) || _selectedClassId == stored.Value.ClassId;
+                    if (matchesUrl)
+                    {
+                        var cls = await ClassSvc.GetClassByIdAsync(stored.Value.ClassId);
+                        if (cls != null && !cls.IsArchived)
+                        {
+                            var roster = await EvalService.GetAllStudentsAsync(cls.Id);
+                            var student = roster.FirstOrDefault(s => s.Id == stored.Value.StudentId);
+                            if (student != null)
+                            {
+                                Session.CurrentStudent = student;
+                                Session.CurrentStudentClassId = cls.Id;
+                                _selectedClassId = cls.Id;
+                                await LoadStudentDashboardDataAsync();
+                                SyncTimers();
+                                StateHasChanged();
+                                return;
+                            }
+                        }
+                        await LocalStorage.DeleteAsync("hetero_student_auth");
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore prerender or expired data protection key cleanly
+            }
+        }
+    }
+
+    private async Task PersistStudentSessionAsync()
+    {
+        if (Session.CurrentStudent == null || !Session.CurrentStudentClassId.HasValue) return;
+        try
+        {
+            await LocalStorage.SetAsync(
+                "hetero_student_auth",
+                new StudentSessionState(Session.CurrentStudentClassId.Value, Session.CurrentStudent.Id));
+        }
+        catch
+        {
+            // Ignore transient JS interop failure
         }
     }
 
@@ -370,15 +783,24 @@ else
         _isLoading = true;
         try
         {
-            var student = await EvalService.ValidateStudentAsync(_loginId);
+            var cls = await ClassSvc.GetClassByIdAsync(_selectedClassId);
+            if (cls == null || cls.IsArchived)
+            {
+                _loginError = "La clase seleccionada no está activa.";
+                return;
+            }
+
+            var student = await EvalService.ValidateStudentAsync(_selectedClassId, _loginMatricula);
             if (student == null)
             {
-                _loginError = "ID no encontrado en el listado inicial del maestro.";
+                _loginError = "Matrícula no encontrada en la clase seleccionada.";
                 return;
             }
             Session.CurrentStudent = student;
-            await LoadClassmatesAsync();
-            SyncPollTimer();
+            Session.CurrentStudentClassId = _selectedClassId;
+            await LoadStudentDashboardDataAsync();
+            await PersistStudentSessionAsync();
+            SyncTimers();
         }
         finally
         {
@@ -386,40 +808,80 @@ else
         }
     }
 
-    private void Logout()
+    private async Task LogoutAsync()
     {
-        StopPollTimer();
+        StopAllTimers();
         Session.CurrentStudent = null;
-        _selectedTarget = null;
+        Session.CurrentStudentClassId = null;
+        _isEvaluating = false;
         _confirmSubmit = false;
-        _classmates.Clear();
-        _loginId = string.Empty;
+        _roundStatus = null;
+        _mySummary = null;
+        _myGroup = null;
+        _myFeedback = null;
+        _loginMatricula = string.Empty;
+        try
+        {
+            await LocalStorage.DeleteAsync("hetero_student_auth");
+        }
+        catch
+        {
+            // Ignore transient JS interop failure
+        }
     }
 
-    private async Task LoadClassmatesAsync()
+    private async Task LoadStudentDashboardDataAsync()
     {
-        if (Session.CurrentStudent == null) return;
-        _classmates = await EvalService.GetClassmatesForEvaluatorAsync(Session.CurrentStudent.Id);
-        _activeCriteria = (await EvalService.GetCriterionConfigsAsync()).Where(c => c.IsActive).ToList();
-        var (state, active) = await EvalService.GetEvaluationStateAsync();
-        _evalState = state;
-        _activeTarget = active;
+        if (Session.CurrentStudent == null || !Session.CurrentStudentClassId.HasValue) return;
+        int cid = Session.CurrentStudentClassId.Value;
+        int sid = Session.CurrentStudent.Id;
+
+        _currentClass = await ClassSvc.GetClassByIdAsync(cid);
+        _activeCriteria = (await EvalService.GetCriterionConfigsAsync(cid)).Where(c => c.IsActive).ToList();
+        _roundStatus = await EvalService.GetStudentRoundStatusAsync(cid, sid);
+        _mySummary = (await EvalService.GetStudentSummariesAsync(cid)).FirstOrDefault(s => s.Student.Id == sid);
+
+        var rosterStudent = _mySummary?.Student;
+        if (rosterStudent != null)
+        {
+            Session.CurrentStudent = rosterStudent;
+        }
+
+        if (Session.CurrentStudent.WorkGroupId.HasValue)
+        {
+            var groups = await ClassSvc.GetGroupsForClassAsync(cid);
+            _myGroup = groups.FirstOrDefault(g => g.Id == Session.CurrentStudent.WorkGroupId.Value);
+        }
+        else
+        {
+            _myGroup = null;
+        }
+
+        _myFeedback = await EvalService.GetStudentAnonymousFeedbackAsync(cid, sid);
+        _timerExpiredSynced = false;
+        SyncCountdownTimer();
+    }
+
+    private void SyncTimers()
+    {
+        SyncPollTimer();
+        SyncCountdownTimer();
     }
 
     private void SyncPollTimer()
     {
-        if (Session.CurrentStudent != null && _selectedTarget == null && !_disposed)
+        if (Session.CurrentStudent != null && !_isEvaluating && !_disposed)
         {
             _pollTimer ??= new System.Threading.Timer(_ =>
             {
                 if (_disposed || _isPolling) return;
                 _ = InvokeAsync(async () =>
                 {
-                    if (_disposed || _isPolling || Session.CurrentStudent == null || _selectedTarget != null) return;
+                    if (_disposed || _isPolling || Session.CurrentStudent == null || _isEvaluating) return;
                     _isPolling = true;
                     try
                     {
-                        await LoadClassmatesAsync();
+                        await LoadStudentDashboardDataAsync();
                         StateHasChanged();
                     }
                     catch
@@ -439,45 +901,185 @@ else
         }
     }
 
+    private void SyncCountdownTimer()
+    {
+        bool hasActiveCountdown = _roundStatus?.Round is { IsOpen: true, RoundEndsAtUtc: not null }
+            && _roundStatus.Round.RoundEndsAtUtc!.Value > DateTime.UtcNow;
+
+        if (Session.CurrentStudent != null && hasActiveCountdown && !_disposed)
+        {
+            _countdownTimer ??= new System.Threading.Timer(_ =>
+            {
+                if (_disposed) return;
+                _ = InvokeAsync(async () =>
+                {
+                    if (_disposed) return;
+                    if (_roundStatus?.Round is { IsOpen: true, RoundEndsAtUtc: not null }
+                        && _roundStatus.Round.RoundEndsAtUtc!.Value <= DateTime.UtcNow)
+                    {
+                        if (!_timerExpiredSynced)
+                        {
+                            _timerExpiredSynced = true;
+                            StopCountdownTimer();
+                            await LoadStudentDashboardDataAsync();
+                        }
+                    }
+                    StateHasChanged();
+                });
+            }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+        else
+        {
+            StopCountdownTimer();
+        }
+    }
+
     private void StopPollTimer()
     {
         _pollTimer?.Dispose();
         _pollTimer = null;
     }
 
+    private void StopCountdownTimer()
+    {
+        _countdownTimer?.Dispose();
+        _countdownTimer = null;
+    }
+
+    private void StopAllTimers()
+    {
+        StopPollTimer();
+        StopCountdownTimer();
+    }
+
     public void Dispose()
     {
         _disposed = true;
-        StopPollTimer();
+        StopAllTimers();
     }
 
-    private void StartEvaluation(Student target)
+    private static string FormatTime(TimeSpan rem)
     {
+        if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
+        return $"{(int)rem.TotalMinutes:00}:{rem.Seconds:00}";
+    }
+
+    private static string GetDraftKey(int classId, int studentId, ActiveRoundInfo round)
+    {
+        var targetKey = string.Join("_", round.TargetStudents.Select(t => t.Id).OrderBy(x => x));
+        return $"hetero_draft_{classId}_{studentId}_{targetKey}";
+    }
+
+    private async Task StartEvaluationAsync()
+    {
+        if (Session.CurrentStudent == null || !Session.CurrentStudentClassId.HasValue || _roundStatus == null) return;
         StopPollTimer();
-        _selectedTarget = target;
+        _isEvaluating = true;
         _evalError = null;
         _confirmSubmit = false;
+        _draftRestored = false;
         _scores = _activeCriteria.ToDictionary(c => c.Key, _ => (int?)null);
         _evidences = _activeCriteria.ToDictionary(c => c.Key, _ => string.Empty);
+
+        _currentDraftKey = GetDraftKey(Session.CurrentStudentClassId.Value, Session.CurrentStudent.Id, _roundStatus.Round);
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("heteroStorage.get", _currentDraftKey);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                var draft = JsonSerializer.Deserialize<RubricDraftPayload>(json);
+                if (draft != null)
+                {
+                    bool anyRestored = false;
+                    foreach (var cfg in _activeCriteria)
+                    {
+                        if (draft.Scores.TryGetValue(cfg.Key, out var sc) && sc.HasValue && sc.Value >= 0 && sc.Value <= 4)
+                        {
+                            _scores[cfg.Key] = sc.Value;
+                            anyRestored = true;
+                        }
+                        if (draft.Evidences.TryGetValue(cfg.Key, out var ev) && !string.IsNullOrWhiteSpace(ev))
+                        {
+                            _evidences[cfg.Key] = ev;
+                            anyRestored = true;
+                        }
+                    }
+                    _draftRestored = anyRestored;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore malformed local draft
+        }
+
+        SyncCountdownTimer();
     }
 
     private void CancelEvaluation()
     {
-        _selectedTarget = null;
+        _isEvaluating = false;
         _evalError = null;
         _confirmSubmit = false;
+        _draftRestored = false;
         SyncPollTimer();
     }
 
-    private void SelectScore(string key, int score)
+    private async Task ClearDraftSelectionAsync()
+    {
+        _scores = _activeCriteria.ToDictionary(c => c.Key, _ => (int?)null);
+        _evidences = _activeCriteria.ToDictionary(c => c.Key, _ => string.Empty);
+        _confirmSubmit = false;
+        _evalError = null;
+        _draftRestored = false;
+        if (!string.IsNullOrWhiteSpace(_currentDraftKey))
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("heteroStorage.remove", _currentDraftKey);
+            }
+            catch
+            {
+                // Ignore storage failure
+            }
+        }
+    }
+
+    private async Task SelectScoreAsync(string key, int score)
     {
         _scores[key] = score;
         _confirmSubmit = false;
         _evalError = null;
+        await SaveDraftAsync();
     }
 
-    private void RequestSubmitConfirmation()
+    private void UpdateEvidenceLocal(string key, string? value)
     {
+        _evidences[key] = value ?? string.Empty;
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_currentDraftKey)) return;
+        try
+        {
+            var payload = new RubricDraftPayload
+            {
+                Scores = _scores,
+                Evidences = _evidences
+            };
+            var json = JsonSerializer.Serialize(payload);
+            await JS.InvokeVoidAsync("heteroStorage.set", _currentDraftKey, json);
+        }
+        catch
+        {
+            // Ignore transient storage failure
+        }
+    }
+
+    private async Task RequestSubmitConfirmationAsync()
+    {
+        await SaveDraftAsync();
         bool allAnswered = _activeCriteria.Count > 0 && _activeCriteria.All(c => _scores.TryGetValue(c.Key, out var v) && v.HasValue);
         if (!allAnswered)
         {
@@ -503,7 +1105,7 @@ else
 
     private async Task SubmitEvaluationAsync()
     {
-        if (Session.CurrentStudent == null || _selectedTarget == null) return;
+        if (Session.CurrentStudent == null || !Session.CurrentStudentClassId.HasValue) return;
 
         bool allAnswered = _activeCriteria.Count > 0 && _activeCriteria.All(c => _scores.TryGetValue(c.Key, out var v) && v.HasValue);
         if (!allAnswered)
@@ -518,12 +1120,12 @@ else
         try
         {
             var inputs = _activeCriteria
-                .Select(c => new CriterionInput(c.Key, _scores[c.Key]!.Value, _evidences[c.Key]))
+                .Select(c => new CriterionInput(c.Key, _scores[c.Key]!.Value, _evidences.GetValueOrDefault(c.Key, string.Empty)))
                 .ToList();
 
-            var (ok, msg) = await EvalService.SubmitEvaluationAsync(
+            var (ok, msg) = await EvalService.SubmitRoundEvaluationAsync(
+                Session.CurrentStudentClassId.Value,
                 Session.CurrentStudent.Id,
-                _selectedTarget.Id,
                 inputs);
 
             if (!ok)
@@ -533,11 +1135,25 @@ else
                 return;
             }
 
-            _statusMessage = $"Evaluación para {_selectedTarget.Nombre} registrada con éxito.";
-            _selectedTarget = null;
+            if (!string.IsNullOrWhiteSpace(_currentDraftKey))
+            {
+                try
+                {
+                    await JS.InvokeVoidAsync("heteroStorage.remove", _currentDraftKey);
+                }
+                catch
+                {
+                    // Ignore storage failure
+                }
+            }
+
+            _statusMessage = msg;
+            _isEvaluating = false;
             _confirmSubmit = false;
-            await LoadClassmatesAsync();
-            SyncPollTimer();
+            _draftRestored = false;
+            _currentDraftKey = null;
+            await LoadStudentDashboardDataAsync();
+            SyncTimers();
         }
         finally
         {

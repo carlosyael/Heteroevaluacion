@@ -5,40 +5,30 @@
 <div class="container py-4">
     <div class="mb-4">
         <h2 class="fw-bold mb-1" style="color: #1F3864;">Instructivo de Uso</h2>
-        <p class="text-muted mb-0">Guía rápida para docentes y estudiantes sobre el Sistema de Heteroevaluación de Tesis.</p>
+        <p class="text-muted mb-0">Guía práctica para docentes y estudiantes sobre el Sistema de Heteroevaluación de Tesis.</p>
     </div>
 
     <div class="row g-4">
         <div class="col-lg-6">
             <div class="card h-100 portal-card-teacher">
                 <div class="card-body p-4">
-                    <h4 class="fw-bold mb-3" style="color: #1F3864;">1. Para el Maestro (Backoffice)</h4>
+                    <h4 class="fw-bold mb-3" style="color: #1F3864;">1. Para el Docente (Panel Docente)</h4>
                     <ol class="ps-3 mb-0 d-flex flex-column gap-2">
                         <li>
-                            <strong>Acceso:</strong> Ingresa a <a href="/maestro">/maestro</a> utilizando tu PIN de docente.
+                            <strong>Mis Clases y Código QR:</strong> Ingresa a <a href="/maestro">/maestro</a> con tu PIN docente.
+                            Desde la barra superior cambia de clase, abre <strong>Mis Clases</strong> (para crear, duplicar o archivar cursos), actualiza el <strong>PIN Docente</strong> o presiona <strong>Proyectar Acceso / QR</strong> para mostrar el QR en el aula.
                         </li>
                         <li>
-                            <strong>Cargar estudiantes:</strong> En la pestaña <em>Estudiantes y Carga Masiva</em>, sube un archivo
-                            <code>.csv</code> o <code>.xlsx</code> con las columnas <code>Id</code>, <code>Nombre</code>,
-                            <code>Carrera</code> y <code>TemaTesis</code> (puedes descargar la plantilla Excel). También puedes agregarlos manualmente.
+                            <strong>1. Sala en Vivo:</strong> Inicia rondas eligiendo un <strong>Grupo predefinido</strong> (pudiendo desmarcar integrantes ausentes), un <strong>Estudiante individual</strong> o una <strong>Selección al vuelo</strong>, con <strong>temporizador opcional</strong> y listas en tiempo real de compañeros <em>Pendientes</em> y <em>Completados</em>.
                         </li>
                         <li>
-                            <strong>Orquestar la evaluación en vivo:</strong> En el panel superior <em>Orquestación de Evaluación</em>,
-                            selecciona al estudiante que va a exponer y presiona <strong>Iniciar Evaluación</strong>.
-                            Verás en tiempo real cuántas evaluaciones han llegado y quiénes faltan por evaluar.
-                            Al finalizar, presiona <strong>Cerrar Evaluación</strong>.
+                            <strong>2. Nómina y Equipos:</strong> Administra <em>Estudiantes</em> (importación CSV/Excel, asignación rápida de grupo en tabla y botón directo <strong>▶ Evaluar</strong>) y <em>Equipos de Trabajo</em> (creación manual o <strong>Auto-agrupar por Tema de Tesis</strong>).
                         </li>
                         <li>
-                            <strong>Consultar y exportar resultados:</strong> En <em>Resultados y Promedios</em> verás el promedio
-                            de cada estudiante, el botón <strong>Ver Detalle</strong>, controles con confirmación para limpiar o eliminar calificaciones,
-                            <strong>Exportar Resultados (.xlsx)</strong> y los botones <strong>Rúbrica (.xlsx)</strong> / <strong>Rúbricas (.zip)</strong>
-                            con la plantilla de rúbrica autocompletada.
+                            <strong>3. Calificaciones y Analítica:</strong> Revisa indicadores clave, detalles por grupo y estudiante (con alertas de <strong>nota atípica</strong>), <strong>Análisis por Criterio</strong>, interruptor para <strong>publicar notas a los estudiantes</strong> y descarga de rúbricas (<code>.xlsx</code> individual, por evaluación, grupal y <code>.zip</code>).
                         </li>
                         <li>
-                            <strong>Configuración y reseteo:</strong> En <em>Configuración y Reseteo</em> puedes editar el
-                            <strong>Nombre del Profesor</strong>, la <strong>Carrera / Programa</strong> del encabezado, el
-                            <strong>Mínimo aprobatorio</strong>, tu <strong>PIN</strong>, los <strong>Criterios y Pesos (%)</strong> (deben sumar 100%)
-                            o <strong>Resetear el sistema desde 0</strong>.
+                            <strong>4. Ficha y Rúbrica:</strong> Configura profesor, programa, temario, mínimo aprobatorio, pesos por criterio (100%) y ciclo de vida de la clase (duplicar, archivar o resetear).
                         </li>
                     </ol>
                 </div>
@@ -51,30 +41,25 @@
                     <h4 class="fw-bold mb-3" style="color: #1F3864;">2. Para el Estudiante (Portal)</h4>
                     <ol class="ps-3 mb-3 d-flex flex-column gap-2">
                         <li>
-                            <strong>Acceso:</strong> Ingresa a <a href="/estudiante">/estudiante</a> usando tu
-                            <strong>ID (matrícula)</strong> registrado por el maestro.
+                            <strong>Acceso directo:</strong> Escanea el QR proyectado o entra a <a href="/estudiante">/estudiante</a>, elige tu clase activa e ingresa tu <strong>Matrícula / ID</strong>. Tu sesión se conserva aunque recargues la página.
                         </li>
                         <li>
-                            <strong>Esperar activación:</strong> Si el maestro aún no inicia una ronda, verás un aviso de espera.
-                            Usa <strong>Actualizar estado</strong> cuando el maestro indique que ya inició.
+                            <strong>Evaluar Exposición:</strong> La vista se actualiza cada 5 segundos y muestra el reloj si la ronda tiene tiempo límite. Tu progreso de rúbrica y observaciones se guarda en <strong>borrador automático</strong> en el navegador por si necesitas recargar.
                         </li>
                         <li>
-                            <strong>Evaluar tesis:</strong> Haz clic en <strong>Evaluar Tesis</strong> sobre el compañero activo.
-                            Selecciona explícitamente el nivel de desempeño para cada criterio (<code>4 Excelente</code> a <code>0 No aceptable</code>)
-                            y agrega observaciones si lo deseas.
+                            <strong>Mis Resultados y Equipo:</strong> Consulta tus integrantes de equipo y, cuando el docente lo habilite, revisa tu promedio y los comentarios anónimos de tus compañeros por criterio.
                         </li>
                         <li>
-                            <strong>Confirmar y enviar:</strong> Una vez completados todos los criterios, verifica tu puntaje en el panel
-                            <em>Resultado</em>, presiona <strong>Enviar Evaluación</strong> y confirma el envío definitivo.
+                            <strong>Temario y Rúbrica:</strong> Consulta en cualquier momento el temario del curso y los criterios vigentes con sus porcentajes.
                         </li>
                     </ol>
 
                     <div class="alert alert-light border small mb-0">
                         <strong>Reglas importantes:</strong>
                         <ul class="mb-0 mt-1 ps-3">
-                            <li>No puedes evaluarte a ti mismo.</li>
-                            <li>Solo puedes calificar <strong>una vez</strong> a cada compañero.</li>
-                            <li>Todos los criterios son obligatorios antes de enviar.</li>
+                            <li>No puedes evaluarte a ti mismo ni a tu propio equipo.</li>
+                            <li>Solo puedes calificar <strong>una vez</strong> cada exposición.</li>
+                            <li>Todos los criterios son obligatorios antes de confirmar el envío.</li>
                         </ul>
                     </div>
                 </div>

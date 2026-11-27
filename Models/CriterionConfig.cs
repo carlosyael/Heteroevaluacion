@@ -1,10 +1,16 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace HeteroevaluacionApp.Models;
 
 public class CriterionConfig
 {
     [Key]
+    public int Id { get; set; }
+
+    public int ClassRoomId { get; set; }
+
+    [Required]
     [MaxLength(50)]
     public string Key { get; set; } = string.Empty;
 
@@ -24,4 +30,7 @@ public class CriterionConfig
     public double Weight { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    [ForeignKey(nameof(ClassRoomId))]
+    public ClassRoom? ClassRoom { get; set; }
 }

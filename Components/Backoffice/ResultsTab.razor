@@ -1,0 +1,639 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject ClassService ClassSvc
+@inject EvaluationService EvalSvc
+@inject IJSRuntime JS
+
+@{
+    var evaluatedStudents = StudentSummaries.Where(s => s.EvaluationsReceivedCount > 0).ToList();
+    int totalStudents = StudentSummaries.Count;
+    double classAvg = evaluatedStudents.Count > 0 ? Math.Round(evaluatedStudents.Average(s => s.AverageScore), 1) : 0;
+    int approvedCount = evaluatedStudents.Count(s => s.Approved);
+    double passRate = evaluatedStudents.Count > 0 ? Math.Round(approvedCount * 100.0 / evaluatedStudents.Count, 0) : 0;
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="kpi-card h-100">
+            <div class="kpi-label">Estudiantes Evaluados</div>
+            <div class="kpi-value">@evaluatedStudents.Count / @totalStudents</div>
+            <div class="text-muted small">Con al menos 1 nota recibida</div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="kpi-card h-100">
+            <div class="kpi-label">Promedio de la Clase</div>
+            <div class="kpi-value">@(evaluatedStudents.Count > 0 ? $"{classAvg:0.0} pts" : "-")</div>
+            <div class="text-muted small">Mínimo aprobatorio: @ActiveClass.MinPassingScore pts</div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="kpi-card h-100">
+            <div class="kpi-label">Tasa de Aprobación</div>
+            <div class="kpi-value">@(evaluatedStudents.Count > 0 ? $"{passRate:0}%" : "-")</div>
+            <div class="text-muted small">@approvedCount aprobado(s) de @evaluatedStudents.Count</div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="kpi-card accent h-100 d-flex flex-column justify-content-between">
+            <div>
+                <div class="kpi-label">Visibilidad Estudiantil</div>
+                <div class="form-check form-switch mt-1">
+                    <input class="form-check-input" type="checkbox" id="publishSwitch"
+                           checked="@ActiveClass.PublishResultsToStudents"
+                           @onchange="TogglePublishResultsAsync" />
+                    <label class="form-check-label small fw-semibold" for="publishSwitch">
+                        @(ActiveClass.PublishResultsToStudents ? "Publicados al alumno" : "Ocultos al alumno")
+                    </label>
+                </div>
+            </div>
+            <div class="text-muted" style="font-size: 0.74rem;">Permite ver su nota y comentarios anónimos</div>
+        </div>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div class="btn-group" role="group">
+        <button type="button"
+                class="btn btn-sm @(_viewMode == 0 ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => SelectViewMode(0)">
+            Por Grupo (@GroupSummaries.Count)
+        </button>
+        <button type="button"
+                class="btn btn-sm @(_viewMode == 1 ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => SelectViewMode(1)">
+            Por Estudiante (@StudentSummaries.Count)
+        </button>
+        <button type="button"
+                class="btn btn-sm @(_viewMode == 2 ? "btn-primary" : "btn-outline-primary")"
+                @onclick="() => SelectViewMode(2)">
+            Análisis por Criterio
+        </button>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="badge bg-light text-dark border">Auto-refresco 5s</span>
+        <button class="btn btn-outline-primary btn-sm" @onclick="RefreshAsync">Refrescar</button>
+        <button class="btn btn-success btn-sm" @onclick="ExportExcelAsync">Reporte Completo (.xlsx)</button>
+        <button class="btn btn-primary btn-sm"
+                disabled="@(!HasAnyEvaluations)"
+                @onclick="ExportAllRubricsZipAsync">
+            Todas las Rúbricas (.zip)
+        </button>
+
+        @if (!_confirmDeleteAll)
+        {
+            <button class="btn btn-outline-danger btn-sm"
+                    disabled="@(!HasAnyEvaluations)"
+                    @onclick="() => _confirmDeleteAll = true">
+                Limpiar todo
+            </button>
+        }
+        else
+        {
+            <div class="d-flex align-items-center gap-1 bg-danger-subtle px-2 py-1 rounded">
+                <span class="small text-danger fw-semibold">¿Borrar todas?</span>
+                <button class="btn btn-danger btn-sm py-0" @onclick="DeleteAllEvaluationsAsync">Sí</button>
+                <button class="btn btn-secondary btn-sm py-0" @onclick="() => _confirmDeleteAll = false">No</button>
+            </div>
+        }
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(_exportError))
+{
+    <div class="alert alert-danger py-2 small">@_exportError</div>
+}
+
+@if (_viewMode == 0)
+{
+    <div class="card mb-4">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th>Grupo</th>
+                        <th>Integrantes</th>
+                        <th>Tema</th>
+                        <th class="text-center">Evaluadores</th>
+                        <th class="text-center">Promedio</th>
+                        <th>Clasificación</th>
+                        <th>Estado</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (GroupSummaries.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                No hay grupos creados en esta clase. Revisa la pestaña <strong>Por Estudiante</strong> o crea equipos en <strong>2. Nómina y Equipos</strong>.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        @foreach (var g in GroupSummaries)
+                        {
+                            <tr class="@(DetailGroup?.Id == g.Group.Id ? "table-primary" : "")">
+                                <td class="fw-bold" style="color: #1F3864;">@g.Group.Name</td>
+                                <td>
+                                    @foreach (var m in g.Members)
+                                    {
+                                        <div>@m.Nombre <span class="text-muted">(@m.Matricula)</span></div>
+                                    }
+                                </td>
+                                <td>@(string.IsNullOrWhiteSpace(g.Group.Topic) ? "-" : g.Group.Topic)</td>
+                                <td class="text-center">@g.UniqueEvaluatorsCount</td>
+                                <td class="text-center fw-bold">
+                                    @(g.UniqueEvaluatorsCount > 0 ? g.AverageScore.ToString("0.00") : "-")
+                                </td>
+                                <td>@g.Classification</td>
+                                <td>
+                                    @if (g.UniqueEvaluatorsCount == 0)
+                                    {
+                                        <span class="badge bg-secondary">Pendiente</span>
+                                    }
+                                    else if (g.Approved)
+                                    {
+                                        <span class="badge bg-success">Aprobado</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger">Reprobado</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <div class="d-flex justify-content-end gap-1">
+                                        <button class="btn btn-outline-primary btn-sm"
+                                                disabled="@(g.UniqueEvaluatorsCount == 0)"
+                                                @onclick="() => ViewGroupDetailsAsync(g.Group)">
+                                            Ver Detalle
+                                        </button>
+                                        <button class="btn btn-outline-success btn-sm"
+                                                disabled="@(g.UniqueEvaluatorsCount == 0)"
+                                                @onclick="() => ExportGroupRubricAsync(g.Group.Id)">
+                                            Rúbrica (.xlsx)
+                                        </button>
+                                        @if (_confirmClearGroupId == g.Group.Id)
+                                        {
+                                            <button class="btn btn-danger btn-sm" @onclick="() => ClearGroupAsync(g.Group.Id)">Confirmar</button>
+                                            <button class="btn btn-secondary btn-sm" @onclick="() => _confirmClearGroupId = null">Cancelar</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-outline-danger btn-sm"
+                                                    disabled="@(g.UniqueEvaluatorsCount == 0)"
+                                                    @onclick="() => _confirmClearGroupId = g.Group.Id">
+                                                Limpiar
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+else if (_viewMode == 1)
+{
+    <div class="card mb-4">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th>Matrícula</th>
+                        <th>Estudiante</th>
+                        <th>Grupo</th>
+                        <th>Tema de Tesis</th>
+                        <th class="text-center">Recibidas</th>
+                        <th class="text-center">Realizadas</th>
+                        <th class="text-center">Promedio</th>
+                        <th>Clasificación</th>
+                        <th>Estado</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in StudentSummaries)
+                    {
+                        <tr class="@(DetailStudent?.Id == row.Student.Id ? "table-primary" : "")">
+                            <td><span class="badge bg-secondary">@row.Student.Matricula</span></td>
+                            <td class="fw-semibold">@row.Student.Nombre</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(row.GroupName))
+                                {
+                                    <span class="badge bg-primary-subtle text-primary border">@row.GroupName</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Individual</span>
+                                }
+                            </td>
+                            <td>@row.Student.TemaTesis</td>
+                            <td class="text-center">@row.EvaluationsReceivedCount</td>
+                            <td class="text-center">@row.EvaluationsGivenCount</td>
+                            <td class="text-center fw-bold">
+                                @(row.EvaluationsReceivedCount > 0 ? row.AverageScore.ToString("0.00") : "-")
+                            </td>
+                            <td>@row.Classification</td>
+                            <td>
+                                @if (row.EvaluationsReceivedCount == 0)
+                                {
+                                    <span class="badge bg-secondary">Pendiente</span>
+                                }
+                                else if (row.Approved)
+                                {
+                                    <span class="badge bg-success">Aprobado</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">Reprobado</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <div class="d-flex justify-content-end gap-1">
+                                    <button class="btn btn-outline-primary btn-sm"
+                                            disabled="@(row.EvaluationsReceivedCount == 0)"
+                                            @onclick="() => ViewStudentDetailsAsync(row.Student)">
+                                        Ver Detalle
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm"
+                                            disabled="@(row.EvaluationsReceivedCount == 0)"
+                                            @onclick="() => ExportStudentRubricAsync(row.Student.Id)">
+                                        Rúbrica (.xlsx)
+                                    </button>
+                                    @if (_confirmClearStudentId == row.Student.Id)
+                                    {
+                                        <button class="btn btn-danger btn-sm" @onclick="() => ClearStudentAsync(row.Student.Id)">Confirmar</button>
+                                        <button class="btn btn-secondary btn-sm" @onclick="() => _confirmClearStudentId = null">Cancelar</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-outline-danger btn-sm"
+                                                disabled="@(row.EvaluationsReceivedCount == 0)"
+                                                @onclick="() => _confirmClearStudentId = row.Student.Id">
+                                            Limpiar
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                <div>
+                    <h5 class="fw-bold mb-0" style="color: #1F3864;">Desempeño Promedio por Criterio</h5>
+                    <span class="text-muted small">Calculado sobre entregas únicas de evaluadores (sin duplicar equipos en Modelo 1).</span>
+                </div>
+                @{
+                    var scoredCriteria = CriterionAnalytics.Where(c => c.EvaluationsCount > 0).ToList();
+                    var strongest = scoredCriteria.OrderByDescending(c => c.AchievementPercent).FirstOrDefault();
+                    var weakest = scoredCriteria.OrderBy(c => c.AchievementPercent).FirstOrDefault();
+                }
+                @if (strongest != null && weakest != null)
+                {
+                    <div class="d-flex flex-wrap gap-2 small">
+                        <span class="badge bg-success-subtle text-success border">Mayor logro: @strongest.Config.ShortName (@strongest.AchievementPercent:0.#%)</span>
+                        <span class="badge bg-warning-subtle text-dark border">A reforzar: @weakest.Config.ShortName (@weakest.AchievementPercent:0.#%)</span>
+                    </div>
+                }
+            </div>
+
+            @if (!HasAnyEvaluations)
+            {
+                <div class="alert alert-light border mb-0">
+                    Aún no hay evaluaciones registradas en esta clase para analizar por criterio.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle small mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Criterio</th>
+                                <th class="text-center">Peso (%)</th>
+                                <th class="text-center">Nivel (0–4)</th>
+                                <th class="text-center">Pts. Ponderados</th>
+                                <th style="min-width: 200px;">Nivel de Logro</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in CriterionAnalytics)
+                            {
+                                string barColor = item.AchievementPercent >= 85 ? "bg-success"
+                                    : item.AchievementPercent >= 70 ? "bg-warning"
+                                    : "bg-danger";
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold">@item.Config.FullTitle</div>
+                                        <div class="text-muted" style="font-size: 0.75rem;">@item.Config.ChapterTag · @item.EvaluationsCount eval. únicas</div>
+                                    </td>
+                                    <td class="text-center fw-semibold">@item.Config.Weight%</td>
+                                    <td class="text-center fw-bold">@item.AverageScore0To4.ToString("0.00") / 4</td>
+                                    <td class="text-center">@item.AverageWeightedPoints.ToString("0.00") / @item.Config.Weight</td>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="progress flex-grow-1" style="height: 10px;">
+                                                <div class="progress-bar @barColor"
+                                                     style="width: @item.AchievementPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                                            </div>
+                                            <span class="fw-bold" style="width: 48px;">@item.AchievementPercent.ToString("0.#")%</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (DetailGroup != null)
+{
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-brand d-flex justify-content-between align-items-center">
+            <strong>Detalle de Evaluaciones del Equipo: @DetailGroup.Name</strong>
+            <button class="btn btn-sm btn-light" @onclick="CloseGroupDetailsAsync">Cerrar</button>
+        </div>
+        <div class="card-body">
+            @if (DetailGroupSubmissions.Count == 0)
+            {
+                <div class="text-muted small">Este equipo aún no tiene evaluaciones registradas.</div>
+            }
+            else
+            {
+                @foreach (var sub in DetailGroupSubmissions)
+                {
+                    <div class="border rounded p-3 mb-3 @(sub.IsOutlier ? "border-warning bg-warning-subtle bg-opacity-10" : "")">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+                            <div>
+                                <strong>Evaluador:</strong> @sub.EvaluatorNombre (@sub.EvaluatorMatricula)
+                                <span class="text-muted small ms-2">@sub.CreatedAt.AddHours(-4).ToString("dd/MM/yyyy HH:mm")</span>
+                                @if (sub.IsOutlier)
+                                {
+                                    <span class="badge bg-warning text-dark ms-2" title="Desviación de 20 pts o más respecto al promedio del equipo">
+                                        ⚠ Nota atípica
+                                    </span>
+                                }
+                            </div>
+                            <div class="d-flex flex-wrap align-items-center gap-1">
+                                <span class="badge bg-dark">@sub.TotalScore.ToString("0.00") / 100</span>
+                                <span class="badge @(sub.Approved ? "bg-success" : "bg-danger")">@sub.Classification</span>
+                                @if (_confirmDeleteBatchKey == sub.SubmissionKey)
+                                {
+                                    <button class="btn btn-danger btn-sm" @onclick="() => DeleteBatchAsync(sub.EvaluationIds)">Confirmar</button>
+                                    <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteBatchKey = null">Cancelar</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteBatchKey = sub.SubmissionKey">
+                                        Eliminar envío
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="row g-2 small">
+                            @foreach (var c in CriterionConfigs)
+                            {
+                                var d = sub.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
+                                if (d != null)
+                                {
+                                    <div class="col-md-4">
+                                        <div class="p-2 bg-light rounded">
+                                            <strong>@c.ShortName:</strong> @d.WeightedPoints.ToString("0.00") / @c.Weight (Nivel @d.Score)
+                                            @if (!string.IsNullOrWhiteSpace(d.Evidence))
+                                            {
+                                                <div class="text-muted fst-italic mt-1">"@d.Evidence"</div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@if (DetailStudent != null)
+{
+    double studentAvg = DetailEvaluations.Count > 0 ? DetailEvaluations.Average(e => e.TotalScore) : 0;
+    <div class="card shadow-sm">
+        <div class="card-header bg-brand d-flex justify-content-between align-items-center">
+            <strong>Detalle de Evaluaciones: @DetailStudent.Nombre (@DetailStudent.Matricula)</strong>
+            <button class="btn btn-sm btn-light" @onclick="CloseStudentDetailsAsync">Cerrar</button>
+        </div>
+        <div class="card-body">
+            @foreach (var eval in DetailEvaluations)
+            {
+                bool evalApproved = eval.TotalScore >= ActiveClass.MinPassingScore;
+                bool isOutlier = EvaluationService.IsOutlierScore(eval.TotalScore, studentAvg, DetailEvaluations.Count);
+                <div class="border rounded p-3 mb-3 @(isOutlier ? "border-warning bg-warning-subtle bg-opacity-10" : "")">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+                        <div>
+                            <strong>Evaluador:</strong> @eval.Evaluator?.Nombre (@eval.Evaluator?.Matricula)
+                            <span class="text-muted small ms-2">@eval.CreatedAt.AddHours(-4).ToString("dd/MM/yyyy HH:mm")</span>
+                            @if (isOutlier)
+                            {
+                                <span class="badge bg-warning text-dark ms-2" title="Desviación de 20 pts o más respecto al promedio del estudiante">
+                                    ⚠ Nota atípica
+                                </span>
+                            }
+                        </div>
+                        <div>
+                            <span class="badge bg-dark me-1">@eval.TotalScore.ToString("0.00") / 100</span>
+                            <span class="badge @(evalApproved ? "bg-success" : "bg-danger") me-2">@eval.Classification</span>
+                            <button class="btn btn-outline-success btn-sm me-1" @onclick="() => ExportSingleEvalRubricAsync(eval.Id)">
+                                Rúbrica (.xlsx)
+                            </button>
+                            @if (_confirmDeleteEvalId == eval.Id)
+                            {
+                                <button class="btn btn-danger btn-sm me-1" @onclick="() => DeleteSingleEvalAsync(eval.Id)">Confirmar</button>
+                                <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteEvalId = null">Cancelar</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteEvalId = eval.Id">Eliminar</button>
+                            }
+                        </div>
+                    </div>
+                    <div class="row g-2 small">
+                        @foreach (var c in CriterionConfigs)
+                        {
+                            var d = eval.Details.FirstOrDefault(x => x.CriterionKey == c.Key);
+                            if (d != null)
+                            {
+                                <div class="col-md-4">
+                                    <div class="p-2 bg-light rounded">
+                                        <strong>@c.ShortName:</strong> @d.WeightedPoints.ToString("0.00") / @c.Weight (Nivel @d.Score)
+                                        @if (!string.IsNullOrWhiteSpace(d.Evidence))
+                                        {
+                                            <div class="text-muted fst-italic mt-1">"@d.Evidence"</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ClassRoom ActiveClass { get; set; } = new();
+    [Parameter, EditorRequired] public List<StudentSummary> StudentSummaries { get; set; } = new();
+    [Parameter, EditorRequired] public List<GroupSummary> GroupSummaries { get; set; } = new();
+    [Parameter, EditorRequired] public List<CriterionConfig> CriterionConfigs { get; set; } = new();
+    [Parameter, EditorRequired] public List<CriterionAnalyticsItem> CriterionAnalytics { get; set; } = new();
+    [Parameter] public Student? DetailStudent { get; set; }
+    [Parameter] public List<Evaluation> DetailEvaluations { get; set; } = new();
+    [Parameter] public WorkGroup? DetailGroup { get; set; }
+    [Parameter] public List<GroupSubmissionDetail> DetailGroupSubmissions { get; set; } = new();
+    [Parameter] public EventCallback<Student?> OnSelectDetailStudent { get; set; }
+    [Parameter] public EventCallback<WorkGroup?> OnSelectDetailGroup { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private int _viewMode;
+    private bool _viewModeInitialized;
+    private bool _confirmDeleteAll;
+    private int? _confirmClearStudentId;
+    private int? _confirmClearGroupId;
+    private int? _confirmDeleteEvalId;
+    private string? _confirmDeleteBatchKey;
+    private string? _exportError;
+
+    private bool HasAnyEvaluations => StudentSummaries.Any(s => s.EvaluationsReceivedCount > 0);
+
+    protected override void OnParametersSet()
+    {
+        if (!_viewModeInitialized)
+        {
+            _viewMode = GroupSummaries.Count > 0 ? 0 : 1;
+            _viewModeInitialized = true;
+        }
+    }
+
+    private void SelectViewMode(int mode) => _viewMode = mode;
+
+    private async Task TogglePublishResultsAsync(ChangeEventArgs e)
+    {
+        bool val = (bool)(e.Value ?? false);
+        await ClassSvc.SetPublishResultsAsync(ActiveClass.Id, val);
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task RefreshAsync() => OnChanged.InvokeAsync();
+
+    private async Task ViewStudentDetailsAsync(Student s)
+    {
+        await OnSelectDetailGroup.InvokeAsync(null);
+        await OnSelectDetailStudent.InvokeAsync(s);
+    }
+
+    private Task CloseStudentDetailsAsync() => OnSelectDetailStudent.InvokeAsync(null);
+
+    private async Task ViewGroupDetailsAsync(WorkGroup g)
+    {
+        await OnSelectDetailStudent.InvokeAsync(null);
+        await OnSelectDetailGroup.InvokeAsync(g);
+    }
+
+    private Task CloseGroupDetailsAsync() => OnSelectDetailGroup.InvokeAsync(null);
+
+    private async Task ClearStudentAsync(int studentId)
+    {
+        _confirmClearStudentId = null;
+        await EvalSvc.DeleteEvaluationsForStudentAsync(studentId);
+        if (DetailStudent?.Id == studentId) await OnSelectDetailStudent.InvokeAsync(null);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ClearGroupAsync(int groupId)
+    {
+        _confirmClearGroupId = null;
+        await EvalSvc.DeleteEvaluationsForGroupAsync(groupId);
+        if (DetailGroup?.Id == groupId) await OnSelectDetailGroup.InvokeAsync(null);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteSingleEvalAsync(int evalId)
+    {
+        _confirmDeleteEvalId = null;
+        await EvalSvc.DeleteEvaluationAsync(evalId);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteBatchAsync(List<int> evalIds)
+    {
+        _confirmDeleteBatchKey = null;
+        await EvalSvc.DeleteEvaluationBatchAsync(evalIds);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task DeleteAllEvaluationsAsync()
+    {
+        _confirmDeleteAll = false;
+        await EvalSvc.DeleteAllEvaluationsForClassAsync(ActiveClass.Id);
+        await OnSelectDetailStudent.InvokeAsync(null);
+        await OnSelectDetailGroup.InvokeAsync(null);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ExportExcelAsync()
+    {
+        _exportError = null;
+        var bytes = await EvalSvc.ExportResultsExcelAsync(ActiveClass.Id);
+        await JS.InvokeVoidAsync("downloadFileFromBytes", "Resultados_Heteroevaluacion.xlsx", Convert.ToBase64String(bytes));
+    }
+
+    private async Task ExportStudentRubricAsync(int studentId) =>
+        await DownloadTupleAsync(() => EvalSvc.ExportStudentRubricExcelAsync(studentId), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+    private async Task ExportGroupRubricAsync(int groupId) =>
+        await DownloadTupleAsync(() => EvalSvc.ExportGroupRubricExcelAsync(groupId), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+    private async Task ExportSingleEvalRubricAsync(int evalId) =>
+        await DownloadTupleAsync(() => EvalSvc.ExportSingleEvaluationRubricExcelAsync(evalId), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+    private async Task ExportAllRubricsZipAsync() =>
+        await DownloadTupleAsync(() => EvalSvc.ExportAllRubricsZipAsync(ActiveClass.Id), "application/zip");
+
+    private async Task DownloadTupleAsync(Func<Task<(byte[] Bytes, string FileName)?>> loader, string mime)
+    {
+        _exportError = null;
+        try
+        {
+            var res = await loader();
+            if (res == null)
+            {
+                _exportError = "No hay evaluaciones registradas para exportar.";
+                return;
+            }
+            await JS.InvokeVoidAsync("downloadFileFromBytes", res.Value.FileName, Convert.ToBase64String(res.Value.Bytes), mime);
+        }
+        catch (Exception ex)
+        {
+            _exportError = $"Error al exportar: {ex.Message}";
+        }
+    }
+}

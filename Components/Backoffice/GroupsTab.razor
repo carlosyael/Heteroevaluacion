@@ -1,0 +1,278 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject ClassService ClassSvc
+@inject EvaluationService EvalSvc
+@inject IJSRuntime JS
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div class="small text-muted">
+        Cada estudiante puede pertenecer a un máximo de <strong>1 grupo</strong>:
+        <strong>@Students.Count(s => s.WorkGroupId != null)</strong> agrupados,
+        <strong>@Students.Count(s => s.WorkGroupId == null)</strong> individuales.
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn btn-outline-primary btn-sm" @onclick="AutoGroupAsync">
+            Auto-agrupar por Tema de Tesis
+        </button>
+        <button class="btn btn-accent btn-sm" @onclick="ToggleNewGroupForm">
+            @(_showForm && !_editingGroupId.HasValue ? "Cerrar Formulario" : "+ Nuevo Grupo")
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(_bannerMessage))
+{
+    <div class="alert @(_bannerError ? "alert-danger" : "alert-info") py-2 small">@_bannerMessage</div>
+}
+
+@if (_showForm)
+{
+    <div class="card mb-4 @(_editingGroupId.HasValue ? "border-warning" : "portal-card-teacher")">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-bold mb-0" style="color: #1F3864;">
+                    @(_editingGroupId.HasValue ? $"Editando Grupo: {_groupName}" : "Crear Nuevo Grupo de Trabajo")
+                </h6>
+                <button type="button" class="btn-close" @onclick="CancelEdit"></button>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-5">
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Nombre del Grupo *</label>
+                        <input type="text" class="form-control form-control-sm" @bind="_groupName" placeholder="Ej. Grupo 1" />
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold">Tema de Tesis / Proyecto (opcional)</label>
+                        <textarea class="form-control form-control-sm" rows="3" @bind="_groupTopic" placeholder="Tema compartido del equipo"></textarea>
+                    </div>
+                </div>
+
+                <div class="col-md-7">
+                    <label class="form-label small fw-semibold">
+                        Integrantes (@_selectedMemberIds.Count seleccionados)
+                    </label>
+                    <div class="border rounded p-2 bg-light d-flex flex-column gap-1" style="max-height: 185px; overflow-y: auto;">
+                        @foreach (var s in Students)
+                        {
+                            bool isSelected = _selectedMemberIds.Contains(s.Id);
+                            bool inOtherGroup = s.WorkGroup != null && s.WorkGroupId != _editingGroupId;
+                            <label class="form-check d-flex align-items-center justify-content-between gap-2 mb-0 small" style="cursor: pointer;">
+                                <span class="d-flex align-items-center gap-2">
+                                    <input type="checkbox" class="form-check-input mt-0"
+                                           checked="@isSelected"
+                                           @onchange="(e) => ToggleMember(s.Id, (bool)(e.Value ?? false))" />
+                                    <span class="fw-semibold">@s.Nombre</span>
+                                    <span class="text-muted">(@s.Matricula)</span>
+                                </span>
+                                @if (inOtherGroup)
+                                {
+                                    <span class="badge bg-warning-subtle text-dark border" title="Al guardar se moverá a este grupo">
+                                        En @s.WorkGroup!.Name
+                                    </span>
+                                }
+                            </label>
+                        }
+                    </div>
+                </div>
+
+                <div class="col-12 d-flex justify-content-end gap-2">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">Cancelar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveGroupAsync">
+                        @(_editingGroupId.HasValue ? "Actualizar Grupo" : "Guardar Grupo")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (Groups.Count == 0)
+{
+    <div class="alert alert-light border">
+        Todavía no hay grupos definidos en esta clase. Crea uno con <strong>+ Nuevo Grupo</strong> o usa <strong>Auto-agrupar por Tema de Tesis</strong>.
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var g in Groups)
+        {
+            var grpSummary = GroupSummaries.FirstOrDefault(gs => gs.Group.Id == g.Id);
+            int evalCount = grpSummary?.UniqueEvaluatorsCount ?? 0;
+
+            <div class="col-md-6">
+                <div class="card h-100 @(_editingGroupId == g.Id ? "border-warning" : "portal-card-student")">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                            <div>
+                                <h6 class="fw-bold mb-0" style="color: #1F3864;">@g.Name</h6>
+                                <div class="text-muted small">
+                                    @(string.IsNullOrWhiteSpace(g.Topic) ? "Sin tema específico" : g.Topic)
+                                </div>
+                            </div>
+                            @if (evalCount > 0)
+                            {
+                                <span class="badge bg-success-subtle text-success border">
+                                    ✓ @evalCount eval. · @grpSummary!.AverageScore.ToString("0.0") pts
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-light text-muted border">Sin evaluar</span>
+                            }
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-1 mb-3 flex-grow-1 align-content-start">
+                            @if (g.Members.Count == 0)
+                            {
+                                <span class="text-muted small fst-italic">Sin integrantes asignados</span>
+                            }
+                            else
+                            {
+                                @foreach (var m in g.Members)
+                                {
+                                    <span class="badge bg-light text-dark border">@m.Nombre (@m.Matricula)</span>
+                                }
+                            }
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-1 pt-2 border-top">
+                            <button class="btn btn-success btn-sm"
+                                    disabled="@(g.Members.Count == 0)"
+                                    @onclick="() => OnLaunchGroup.InvokeAsync(g)">
+                                ▶ Evaluar Equipo
+                            </button>
+                            @if (evalCount > 0)
+                            {
+                                <button class="btn btn-outline-success btn-sm" @onclick="() => ExportGroupRubricAsync(g.Id)">
+                                    Rúbrica (.xlsx)
+                                </button>
+                            }
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEdit(g)">Editar</button>
+                            @if (_confirmDeleteGroupId == g.Id)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteGroupAsync(g.Id)">Confirmar</button>
+                                <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteGroupId = null">Cancelar</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteGroupId = g.Id">Eliminar</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClassRoomId { get; set; }
+    [Parameter, EditorRequired] public List<Student> Students { get; set; } = new();
+    [Parameter, EditorRequired] public List<WorkGroup> Groups { get; set; } = new();
+    [Parameter, EditorRequired] public List<GroupSummary> GroupSummaries { get; set; } = new();
+    [Parameter] public EventCallback<WorkGroup> OnLaunchGroup { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _showForm;
+    private int? _editingGroupId;
+    private string _groupName = string.Empty;
+    private string _groupTopic = string.Empty;
+    private HashSet<int> _selectedMemberIds = new();
+    private int? _confirmDeleteGroupId;
+    private string? _bannerMessage;
+    private bool _bannerError;
+
+    private void ToggleNewGroupForm()
+    {
+        if (_showForm && !_editingGroupId.HasValue)
+        {
+            _showForm = false;
+        }
+        else
+        {
+            _editingGroupId = null;
+            _groupName = string.Empty;
+            _groupTopic = string.Empty;
+            _selectedMemberIds.Clear();
+            _bannerMessage = null;
+            _showForm = true;
+        }
+    }
+
+    private void ToggleMember(int studentId, bool selected)
+    {
+        if (selected) _selectedMemberIds.Add(studentId);
+        else _selectedMemberIds.Remove(studentId);
+    }
+
+    private void StartEdit(WorkGroup g)
+    {
+        _editingGroupId = g.Id;
+        _groupName = g.Name;
+        _groupTopic = g.Topic ?? string.Empty;
+        _selectedMemberIds = g.Members.Select(m => m.Id).ToHashSet();
+        _bannerMessage = null;
+        _confirmDeleteGroupId = null;
+        _showForm = true;
+    }
+
+    private void CancelEdit()
+    {
+        _editingGroupId = null;
+        _groupName = string.Empty;
+        _groupTopic = string.Empty;
+        _selectedMemberIds.Clear();
+        _showForm = false;
+    }
+
+    private async Task SaveGroupAsync()
+    {
+        var (ok, msg) = await ClassSvc.SaveGroupAsync(
+            ClassRoomId, _editingGroupId, _groupName, _groupTopic, _selectedMemberIds.ToList());
+        _bannerError = !ok;
+        _bannerMessage = msg;
+        if (ok)
+        {
+            CancelEdit();
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private async Task DeleteGroupAsync(int groupId)
+    {
+        _confirmDeleteGroupId = null;
+        if (_editingGroupId == groupId) CancelEdit();
+        await ClassSvc.DeleteGroupAsync(groupId);
+        _bannerError = false;
+        _bannerMessage = "Grupo eliminado.";
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task AutoGroupAsync()
+    {
+        int created = await ClassSvc.AutoGroupByThesisTopicAsync(ClassRoomId);
+        _bannerError = false;
+        _bannerMessage = created > 0
+            ? $"Se crearon {created} grupo(s) automáticamente según los temas de tesis coincidentes."
+            : "No se encontraron estudiantes sin grupo que compartan el mismo tema de tesis.";
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ExportGroupRubricAsync(int groupId)
+    {
+        var result = await EvalSvc.ExportGroupRubricExcelAsync(groupId);
+        if (result == null)
+        {
+            _bannerError = true;
+            _bannerMessage = "Este grupo aún no tiene evaluaciones registradas.";
+            return;
+        }
+        await JS.InvokeVoidAsync(
+            "downloadFileFromBytes",
+            result.Value.FileName,
+            Convert.ToBase64String(result.Value.Bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+}

@@ -1,0 +1,349 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject ClassService ClassSvc
+@inject StudentImportService ImportSvc
+@inject EvaluationService EvalSvc
+@inject IJSRuntime JS
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div class="d-flex flex-wrap gap-2">
+        <input type="text" class="form-control form-control-sm" style="width: 210px;"
+               placeholder="Buscar por nombre o matrícula..."
+               @bind="_searchTerm" @bind:event="oninput" />
+        <select class="form-select form-select-sm" style="width: 170px;" @bind="_groupFilter">
+            <option value="">Todos los grupos</option>
+            <option value="__none">Sin grupo (Individual)</option>
+            @foreach (var g in Groups)
+            {
+                <option value="@g.Id">@g.Name</option>
+            }
+        </select>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button class="btn @(_showImport ? "btn-primary" : "btn-outline-primary") btn-sm"
+                @onclick="() => _showImport = !_showImport">
+            @(_showImport ? "Cerrar Importación" : "Importar CSV / Excel")
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="DownloadTemplateAsync">
+            Plantilla Excel (.xlsx)
+        </button>
+        <button class="btn btn-accent btn-sm" @onclick="ToggleNewStudentForm">
+            @(_showStudentForm && !_isEditingStudent ? "Cerrar Formulario" : "+ Agregar Estudiante")
+        </button>
+    </div>
+</div>
+
+@if (_showImport)
+{
+    <div class="card mb-3 portal-card-student">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-bold mb-0" style="color: #1F3864;">Importación Masiva de Estudiantes</h6>
+                <button type="button" class="btn-close" @onclick="() => _showImport = false"></button>
+            </div>
+            <p class="text-muted small mb-2">
+                Columnas esperadas: <code>Id</code>, <code>Nombre</code>, <code>Carrera</code>, <code>TemaTesis</code> y opcionalmente <code>Grupo</code>.
+            </p>
+            <InputFile OnChange="HandleFileUpload" accept=".csv,.xlsx,.xls" class="form-control form-control-sm mb-2" />
+
+            @if (_isUploading)
+            {
+                <div class="text-primary small">Procesando archivo...</div>
+            }
+
+            @if (_importResult != null)
+            {
+                <div class="alert alert-info py-2 small mb-0 mt-2">
+                    <strong>Importación completada:</strong>
+                    @_importResult.Added agregados, @_importResult.Updated actualizados.
+                    @if (_importResult.Errors.Count > 0)
+                    {
+                        <ul class="mb-0 mt-1 text-danger">
+                            @foreach (var err in _importResult.Errors.Take(5))
+                            {
+                                <li>@err</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (_showStudentForm)
+{
+    <div class="card mb-3 @(_isEditingStudent ? "border-warning" : "portal-card-teacher")">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-bold mb-0" style="color: #1F3864;">
+                    @(_isEditingStudent ? $"Editando Estudiante ({_formStudent.Matricula})" : "Registrar Nuevo Estudiante")
+                </h6>
+                <button type="button" class="btn-close" @onclick="CancelEdit"></button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_formMessage))
+            {
+                <div class="alert @(_formIsError ? "alert-danger" : "alert-success") py-2 small">@_formMessage</div>
+            }
+
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">ID (Matrícula) *</label>
+                    <input type="text" class="form-control form-control-sm" @bind="_formStudent.Matricula" placeholder="Ej. 20210001" disabled="@_isEditingStudent" />
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Nombre Completo *</label>
+                    <input type="text" class="form-control form-control-sm" @bind="_formStudent.Nombre" placeholder="Ej. Ana García" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Grupo (opcional)</label>
+                    <select class="form-select form-select-sm" value="@(_formStudent.WorkGroupId?.ToString() ?? "")" @onchange="OnFormGroupChanged">
+                        <option value="">-- Sin grupo (Individual) --</option>
+                        @foreach (var g in Groups)
+                        {
+                            <option value="@g.Id">@g.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Carrera</label>
+                    <input type="text" class="form-control form-control-sm" @bind="_formStudent.Carrera" placeholder="Ej. Ing. en Sistemas" />
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label small fw-semibold">Tema de Tesis</label>
+                    <input type="text" class="form-control form-control-sm" @bind="_formStudent.TemaTesis" placeholder="Título del tema de tesis" />
+                </div>
+                <div class="col-12 d-flex justify-content-end gap-2 mt-2">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">Cancelar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveStudentAsync">
+                        @(_isEditingStudent ? "Actualizar Estudiante" : "Guardar Estudiante")
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    <th>Matrícula</th>
+                    <th>Estudiante</th>
+                    <th style="min-width: 165px;">Grupo asignado</th>
+                    <th>Tema de Tesis</th>
+                    <th>Exposición</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!FilteredStudents.Any())
+                {
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            No hay estudiantes que coincidan con el filtro actual.
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var s in FilteredStudents)
+                    {
+                        var stSum = StudentSummaries.FirstOrDefault(x => x.Student.Id == s.Id);
+                        int evalCount = stSum?.EvaluationsReceivedCount ?? 0;
+                        <tr class="@(_isEditingStudent && _formStudent.Id == s.Id ? "table-warning" : "")">
+                            <td><span class="badge bg-secondary">@s.Matricula</span></td>
+                            <td>
+                                <div class="fw-semibold">@s.Nombre</div>
+                                <div class="text-muted" style="font-size: 0.76rem;">@s.Carrera</div>
+                            </td>
+                            <td>
+                                <select class="form-select form-select-sm"
+                                        value="@(s.WorkGroupId?.ToString() ?? "")"
+                                        @onchange="(e) => QuickAssignGroupAsync(s.Id, e)">
+                                    <option value="">Individual</option>
+                                    @foreach (var g in Groups)
+                                    {
+                                        <option value="@g.Id">@g.Name</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>@s.TemaTesis</td>
+                            <td>
+                                @if (evalCount > 0)
+                                {
+                                    <span class="badge bg-success-subtle text-success border">✓ @evalCount eval. (@stSum!.AverageScore.ToString("0.0"))</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-light text-muted border">Pendiente</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                @if (_confirmDeleteId == s.Id)
+                                {
+                                    <div class="d-flex justify-content-end gap-1">
+                                        <button class="btn btn-danger btn-sm" @onclick="() => DeleteStudentAsync(s.Id)">Confirmar</button>
+                                        <button class="btn btn-secondary btn-sm" @onclick="() => _confirmDeleteId = null">Cancelar</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="d-flex justify-content-end gap-1">
+                                        <button class="btn btn-success btn-sm"
+                                                title="Iniciar evaluación individual ahora"
+                                                @onclick="() => OnLaunchStudent.InvokeAsync(s.Id)">
+                                            ▶ Evaluar
+                                        </button>
+                                        <button class="btn btn-outline-primary btn-sm" @onclick="() => StartEdit(s)">Editar</button>
+                                        <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDeleteId = s.Id">Eliminar</button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ClassRoomId { get; set; }
+    [Parameter, EditorRequired] public List<Student> Students { get; set; } = new();
+    [Parameter, EditorRequired] public List<WorkGroup> Groups { get; set; } = new();
+    [Parameter, EditorRequired] public List<StudentSummary> StudentSummaries { get; set; } = new();
+    [Parameter] public EventCallback<int> OnLaunchStudent { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _showImport;
+    private bool _showStudentForm;
+    private Student _formStudent = new();
+    private bool _isEditingStudent;
+    private bool _formIsError;
+    private string? _formMessage;
+    private bool _isUploading;
+    private ImportResult? _importResult;
+    private string _searchTerm = string.Empty;
+    private string _groupFilter = string.Empty;
+    private int? _confirmDeleteId;
+
+    private IEnumerable<Student> FilteredStudents => Students.Where(s =>
+    {
+        bool matchSearch = string.IsNullOrWhiteSpace(_searchTerm)
+            || s.Matricula.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase)
+            || s.Nombre.Contains(_searchTerm, StringComparison.OrdinalIgnoreCase);
+
+        bool matchGroup = _groupFilter switch
+        {
+            "" => true,
+            "__none" => s.WorkGroupId == null,
+            _ => int.TryParse(_groupFilter, out int gid) && s.WorkGroupId == gid
+        };
+        return matchSearch && matchGroup;
+    });
+
+    private void ToggleNewStudentForm()
+    {
+        if (_showStudentForm && !_isEditingStudent)
+        {
+            _showStudentForm = false;
+        }
+        else
+        {
+            _formStudent = new Student();
+            _isEditingStudent = false;
+            _formMessage = null;
+            _formIsError = false;
+            _showStudentForm = true;
+        }
+    }
+
+    private void OnFormGroupChanged(ChangeEventArgs e)
+    {
+        _formStudent.WorkGroupId = int.TryParse(e.Value?.ToString(), out int gid) ? gid : null;
+    }
+
+    private async Task QuickAssignGroupAsync(int studentId, ChangeEventArgs e)
+    {
+        int? gid = int.TryParse(e.Value?.ToString(), out int parsed) ? parsed : null;
+        await ClassSvc.AssignStudentGroupAsync(ClassRoomId, studentId, gid);
+        await OnChanged.InvokeAsync();
+    }
+
+    private void StartEdit(Student s)
+    {
+        _formStudent = new Student
+        {
+            Id = s.Id,
+            ClassRoomId = s.ClassRoomId,
+            Matricula = s.Matricula,
+            Nombre = s.Nombre,
+            Carrera = s.Carrera,
+            TemaTesis = s.TemaTesis,
+            WorkGroupId = s.WorkGroupId
+        };
+        _isEditingStudent = true;
+        _showStudentForm = true;
+        _formMessage = null;
+        _formIsError = false;
+        _confirmDeleteId = null;
+    }
+
+    private void CancelEdit()
+    {
+        _formStudent = new Student();
+        _isEditingStudent = false;
+        _showStudentForm = false;
+        _formMessage = null;
+        _formIsError = false;
+    }
+
+    private async Task SaveStudentAsync()
+    {
+        var (ok, msg) = await EvalSvc.AddOrUpdateStudentAsync(ClassRoomId, _formStudent, _isEditingStudent);
+        _formIsError = !ok;
+        _formMessage = msg;
+        if (ok)
+        {
+            _isEditingStudent = false;
+            _showStudentForm = false;
+            _formStudent = new Student();
+            await OnChanged.InvokeAsync();
+        }
+    }
+
+    private async Task DeleteStudentAsync(int studentId)
+    {
+        _confirmDeleteId = null;
+        if (_isEditingStudent && _formStudent.Id == studentId) CancelEdit();
+        await EvalSvc.DeleteStudentAsync(studentId);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _importResult = null;
+        try
+        {
+            var file = e.File;
+            await using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            _importResult = await ImportSvc.ImportFromStreamAsync(ClassRoomId, stream, file.Name);
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _isUploading = false;
+        }
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        var bytes = ImportSvc.GenerateTemplateExcel();
+        await JS.InvokeVoidAsync("downloadFileFromBytes", "Plantilla_Estudiantes.xlsx", Convert.ToBase64String(bytes));
+    }
+}

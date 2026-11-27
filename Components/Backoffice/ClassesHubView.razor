@@ -1,0 +1,206 @@
+@using HeteroevaluacionApp.Models
+@using HeteroevaluacionApp.Services
+@inject ClassService ClassSvc
+
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+        <h4 class="fw-bold mb-0" style="color: #1F3864;">Administración de Clases (@Classes.Count)</h4>
+        <span class="text-muted small">Crea nuevas clases, duplica configuraciones o archiva cursos terminados.</span>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-sm @(_filter == 0 ? "btn-primary" : "btn-outline-primary")" @onclick="() => _filter = 0">
+                Activas (@Classes.Count(c => !c.IsArchived))
+            </button>
+            <button type="button" class="btn btn-sm @(_filter == 1 ? "btn-primary" : "btn-outline-primary")" @onclick="() => _filter = 1">
+                Archivadas (@Classes.Count(c => c.IsArchived))
+            </button>
+            <button type="button" class="btn btn-sm @(_filter == 2 ? "btn-primary" : "btn-outline-primary")" @onclick="() => _filter = 2">
+                Todas (@Classes.Count)
+            </button>
+        </div>
+        <button class="btn btn-accent btn-sm" @onclick="() => _showCreate = !_showCreate">
+            @(_showCreate ? "Cerrar formulario" : "+ Nueva Clase")
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(_hubMsg))
+{
+    <div class="alert @(_hubError ? "alert-danger" : "alert-info") py-2 small alert-dismissible fade show">
+        @_hubMsg
+        <button type="button" class="btn-close" @onclick="() => _hubMsg = null"></button>
+    </div>
+}
+
+@if (_showCreate)
+{
+    <div class="card mb-4 portal-card-teacher">
+        <div class="card-body">
+            <h5 class="fw-bold mb-3" style="color: #1F3864;">Crear Nueva Clase</h5>
+            <div class="row g-3">
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Nombre de la Clase *</label>
+                    <input type="text" class="form-control" @bind="_newName" placeholder="Ej. Seminario de Tesis II" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Código URL (opcional)</label>
+                    <input type="text" class="form-control" @bind="_newCode" placeholder="Auto" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Mínimo aprobatorio</label>
+                    <input type="number" step="0.5" min="0" max="100" class="form-control" @bind="_newMinPassing" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Profesor</label>
+                    <input type="text" class="form-control" @bind="_newTeacher" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Programa / Carrera</label>
+                    <input type="text" class="form-control" @bind="_newProgram" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label small fw-semibold">Temario (opcional)</label>
+                    <textarea class="form-control" rows="2" @bind="_newSyllabus" placeholder="Unidades o temas principales del curso"></textarea>
+                </div>
+                <div class="col-12 d-flex justify-content-end gap-2">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _showCreate = false">Cancelar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="CreateClassAsync">Crear y abrir clase</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (!FilteredClasses.Any())
+{
+    <div class="alert alert-light border">
+        No hay clases en esta vista. Puedes crear una nueva clase con el botón <strong>+ Nueva Clase</strong>.
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var cls in FilteredClasses)
+        {
+            bool isSelected = cls.Id == SelectedClassId;
+            <div class="col-md-6">
+                <div class="card h-100 @(isSelected ? "portal-card-teacher" : "portal-card-student")">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                            <div>
+                                <h5 class="fw-bold mb-1" style="color: #1F3864;">@cls.Name</h5>
+                                <span class="badge bg-dark font-monospace">@cls.Code</span>
+                                @if (isSelected)
+                                {
+                                    <span class="badge bg-warning text-dark ms-1">Seleccionada</span>
+                                }
+                            </div>
+                            <div class="d-flex flex-wrap gap-1">
+                                @if (cls.IsArchived)
+                                {
+                                    <span class="badge bg-secondary">Archivada</span>
+                                }
+                                else if (cls.IsEvaluationOpen)
+                                {
+                                    <span class="badge bg-success">Ronda en Vivo</span>
+                                }
+                                @if (cls.PublishResultsToStudents)
+                                {
+                                    <span class="badge bg-primary-subtle text-primary border">Notas públicas</span>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="small text-muted mb-2 flex-grow-1">
+                            <div><strong>Profesor:</strong> @cls.TeacherName</div>
+                            <div><strong>Programa:</strong> @(string.IsNullOrWhiteSpace(cls.ProgramName) ? "No especificado" : cls.ProgramName)</div>
+                            <div><strong>Mínimo aprobatorio:</strong> @cls.MinPassingScore pts</div>
+                            @if (!string.IsNullOrWhiteSpace(cls.Syllabus))
+                            {
+                                var preview = cls.Syllabus.Length > 130 ? cls.Syllabus[..130] + "..." : cls.Syllabus;
+                                <div class="mt-1 fst-italic text-truncate" title="@cls.Syllabus">@preview</div>
+                            }
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-2 pt-2 border-top">
+                            <button class="btn btn-primary btn-sm" @onclick="() => OnOpenClass.InvokeAsync(cls.Id)">
+                                Abrir clase
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => OnShowQr.InvokeAsync(cls)">
+                                Proyectar QR
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => DuplicateAsync(cls.Id)">
+                                Duplicar
+                            </button>
+                            <button class="btn @(cls.IsArchived ? "btn-outline-success" : "btn-outline-warning") btn-sm"
+                                    @onclick="() => ToggleArchiveAsync(cls)">
+                                @(cls.IsArchived ? "Reactivar" : "Archivar")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public List<ClassRoom> Classes { get; set; } = new();
+    [Parameter, EditorRequired] public int SelectedClassId { get; set; }
+    [Parameter] public EventCallback<int> OnOpenClass { get; set; }
+    [Parameter] public EventCallback<int> OnClassCreated { get; set; }
+    [Parameter] public EventCallback<ClassRoom> OnShowQr { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private int _filter = 0; // 0: Active, 1: Archived, 2: All
+    private bool _showCreate;
+    private string _newName = string.Empty;
+    private string _newCode = string.Empty;
+    private string _newTeacher = "Ricardo Cesar Reinoso Rodriguez";
+    private string _newProgram = "Maestría en Enseñanza de la Matemática en el Nivel Secundario";
+    private string _newSyllabus = string.Empty;
+    private double _newMinPassing = 70.0;
+    private string? _hubMsg;
+    private bool _hubError;
+
+    private IEnumerable<ClassRoom> FilteredClasses => _filter switch
+    {
+        0 => Classes.Where(c => !c.IsArchived),
+        1 => Classes.Where(c => c.IsArchived),
+        _ => Classes
+    };
+
+    private async Task CreateClassAsync()
+    {
+        var (ok, msg, created) = await ClassSvc.CreateClassAsync(
+            _newName, _newCode, _newTeacher, _newProgram, _newSyllabus, _newMinPassing);
+        _hubError = !ok;
+        _hubMsg = msg;
+        if (ok && created != null)
+        {
+            _newName = string.Empty;
+            _newCode = string.Empty;
+            _newSyllabus = string.Empty;
+            _newMinPassing = 70.0;
+            _showCreate = false;
+            await OnClassCreated.InvokeAsync(created.Id);
+        }
+    }
+
+    private async Task DuplicateAsync(int classId)
+    {
+        var (ok, msg, _) = await ClassSvc.DuplicateClassAsync(classId);
+        _hubError = !ok;
+        _hubMsg = msg;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ToggleArchiveAsync(ClassRoom cls)
+    {
+        var (ok, msg) = await ClassSvc.SetClassArchivedAsync(cls.Id, !cls.IsArchived);
+        _hubError = !ok;
+        _hubMsg = msg;
+        await OnChanged.InvokeAsync();
+    }
+}
